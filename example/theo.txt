@@ -1,5 +1,3 @@
-# Theo's transmon readout setup, based on the old hand-drawn diagram.
-
 owner: Theo
 
 [device cavity]

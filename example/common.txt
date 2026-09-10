@@ -1,5 +1,4 @@
-# Shared fridge infrastructure -- edit only when the fridge itself changes.
-# Extracted from wiring_diagram.odg with tools/extract_odg.py, then proofread.
+# Shared fridge infrastructure.
 
 owner: Common
 fridge: Bluefors Dilution Fridge

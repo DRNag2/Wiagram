@@ -1,5 +1,3 @@
-# Haley's Kerr-Cat setup with a pump coupled in via a directional coupler.
-
 owner: Haley
 
 [device kc]
