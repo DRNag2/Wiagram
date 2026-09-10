@@ -1,0 +1,30 @@
+# Haley's Kerr-Cat setup with a pump coupled in via a directional coupler.
+
+owner: Haley
+
+[device kc]
+type: experiment
+label: Kerr-Cat
+serial: YC20231120-01
+plate: MXC
+ports: in:W, out:E
+
+[device c6]
+type: circulator
+label: C6
+
+[device dc20]
+type: coupler
+label: DC20
+
+[cable cu9]
+type: copper
+serial: TS240628-1
+
+[wiring]
+In 5 -> -20dB@MXC -> eccosorb -> dc20.in
+In 12 -> lp(12GHz) -> dc20.cpl
+dc20.out -> kc.in
+kc.out -> cu9 -> c6.1
+c6.2 -> iso -> Out C
+c6.3 -> term

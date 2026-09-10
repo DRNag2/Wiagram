@@ -1,0 +1,25 @@
+# Theo's transmon readout setup, based on the old hand-drawn diagram.
+
+owner: Theo
+
+[device cavity]
+type: experiment
+label: Transmon + Cavity
+serial: TS20231027-1
+plate: MXC
+ports: ro_in:W, qubit:W, ro_out:E
+
+[device c24]
+type: circulator
+label: C24
+
+[cable nb1]
+type: NbTi
+serial: ZS20211123-3
+
+[wiring]
+In 1 -> -10dB@MXC -> knl -> cavity.ro_in
+In 2 -> -3dB@MXC -> knl -> cavity.qubit
+cavity.ro_out -> nb1 -> c24.1
+c24.2 -> Out B
+c24.3 -> term

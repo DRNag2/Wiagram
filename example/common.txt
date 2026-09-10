@@ -1,0 +1,57 @@
+# Shared fridge infrastructure -- edit only when the fridge itself changes.
+# Extracted from wiring_diagram.odg with tools/extract_odg.py, then proofread.
+
+owner: Common
+fridge: Bluefors Dilution Fridge
+
+[plates]
+Top: 300K
+77K: 77K
+4K: 4K
+Still: 800mK
+Cold: 100mK
+MXC: 20mK
+
+# ---- input lines ----------------------------------------------------------
+# Bulkheads at every plate down to Still; -20dB at 4K; Still attenuator
+# differs per block (In 1-15 have -10dB, In 16-24 have 0dB).
+
+[template input_line]
+group: Inputs
+chain: bulkhead@Top -> cable(SS) -> bulkhead@77K -> cable(SS) -> bulkhead@4K ->
+       -20dB@4K -> cable(SS) -> bulkhead@Still -> {still}@Still -> cable(SS)
+
+# ---- output lines ---------------------------------------------------------
+# Out B..G carry HEMTs A1-A6 at 4K and numbered Eccosorb filters at MXC;
+# Out A and Out H are unamplified spares.
+
+[template output_amp]
+group: Outputs
+direction: out
+chain: bulkhead@Top -> cable(SS) -> bulkhead@77K -> cable(SS) ->
+       hemt({amp})@4K -> cable(NbTi) -> filter(Ecc {n})@MXC
+
+[template output_bare]
+group: Outputs
+direction: out
+chain: bulkhead@Top -> cable(SS) -> bulkhead@77K -> cable(SS) -> bulkhead@4K -> cable(NbTi)
+
+# ---- DC looms -------------------------------------------------------------
+# Fischer feedthrough on the top plate, DB-25 inside, loom down to 4K.
+
+[template dc_loom]
+group: DC
+chain: fischer -> bulkhead@Top -> db25 -> cable(loom) -> db25@4K
+
+[lines]
+Out A: output_bare
+Out B: output_amp(amp=A1, n=1)
+Out C: output_amp(amp=A2, n=2)
+Out D: output_amp(amp=A3, n=3)
+Out E: output_amp(amp=A4, n=4)
+Out F: output_amp(amp=A5, n=5)
+Out G: output_amp(amp=A6, n=6)
+Out H: output_bare
+DC A..DC C: dc_loom
+In 1..In 15: input_line(still=-10dB)
+In 16..In 24: input_line(still=0dB)
