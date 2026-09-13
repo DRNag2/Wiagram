@@ -1,12 +1,11 @@
-"""Data model for wiagram: components, ports, connections, lines, chains."""
+# data structures for the wiring diagram stuff
 
 from dataclasses import dataclass, field
 from typing import Optional
 
 
 class ParseError(Exception):
-    """Error in a wiring text file, with source location."""
-
+    # just so we can say which file/line blew up
     def __init__(self, msg, file=None, line=None):
         self.msg = msg
         self.file = file
@@ -15,7 +14,10 @@ class ParseError(Exception):
 
     def __str__(self):
         if self.file:
-            loc = self.file if self.line is None else "%s:%d" % (self.file, self.line)
+            if self.line is None:
+                loc = self.file
+            else:
+                loc = "%s:%d" % (self.file, self.line)
             return "%s: %s" % (loc, self.msg)
         return self.msg
 
@@ -26,7 +28,7 @@ class Src:
     line: int = 0
 
 
-# Canonical component kinds and the aliases accepted in `type:` fields.
+# map whatever people type to the real kind name
 KIND_ALIASES = {
     "attenuator": "attenuator", "atten": "attenuator",
     "circulator": "circulator",
@@ -47,7 +49,7 @@ KIND_ALIASES = {
     "cable": "cable",
 }
 
-# Fixed port sets per kind. None => dynamic (ports created as referenced).
+# some kinds have fixed ports. None means we make them up as we go
 FIXED_PORTS = {
     "circulator": ["1", "2", "3"],
     "coupler": ["in", "out", "cpl", "iso"],
@@ -63,8 +65,8 @@ TWO_PORT_KINDS = {
 
 DYNAMIC_PORT_KINDS = {"experiment", "device"}
 
-# Default through-path (entry, exit) for multi-port kinds used mid-chain
-# without explicit ports.
+# default in/out when someone puts a multiport thing in the middle of a chain
+# without saying which ports
 AUTO_THROUGH = {
     "circulator": ("1", "2"),
     "isolator": ("in", "out"),
@@ -77,23 +79,23 @@ AUTO_THROUGH = {
 class Component:
     id: str
     kind: str
-    name: str = ""            # user-facing declared name, if any
+    name: str = ""
     label: str = ""
     serial: str = ""
     plate: str = ""
     owner: str = ""
     color: str = ""
     note: str = ""
-    port_list: Optional[list] = None   # explicit port order (dynamic kinds)
-    port_sides: dict = field(default_factory=dict)  # port -> W/E/N/S override
+    port_list: Optional[list] = None
+    port_sides: dict = field(default_factory=dict)  # port -> W/E/N/S
     src: Src = field(default_factory=Src)
-    # Filled by layout:
+    # layout fills these in later
     x: float = 0.0
     y: float = 0.0
-    orient: str = "h"          # 'h' = flow left->right, 'v' = flow downward
-    flip: bool = False         # signal flows right->left (output lines)
+    orient: str = "h"   # h = left to right, v = going down
+    flip: bool = False  # True if signal goes right to left (output lines)
     placed: bool = False
-    zone: str = ""             # 'line' or 'band'
+    zone: str = ""      # "line" or "band"
 
     def ports(self):
         if self.kind in FIXED_PORTS:
@@ -103,25 +105,26 @@ class Component:
         return ["in", "out"]
 
     def display_label(self):
+        # prefer the label they set, otherwise the name
         return self.label or self.name
 
 
 @dataclass
 class Connection:
-    a: tuple                  # (component_id, port)
+    a: tuple   # (component_id, port)
     b: tuple
     cable_id: Optional[str] = None
     owner: str = ""
     src: Src = field(default_factory=Src)
-    points: list = field(default_factory=list)   # filled by layout
+    points: list = field(default_factory=list)  # layout puts the polyline here
 
 
 @dataclass
 class Chain:
-    """One `->` chain as written; drives layout order."""
+    # one -> chain from the text file. layout uses the order of comps
     owner: str
-    comps: list = field(default_factory=list)     # ordered component ids (no cables)
-    line: str = ""                                # set for line-template chains
+    comps: list = field(default_factory=list)  # component ids in order (no cables)
+    line: str = ""   # set if this came from a line template
     src: Src = field(default_factory=Src)
 
 
@@ -139,14 +142,14 @@ class Line:
 class Design:
     def __init__(self):
         self.meta = {}
-        self.plates = []          # [(name, temp_label)]
-        self.components = {}      # id -> Component (insertion ordered)
+        self.plates = []         # list of (name, temp_label)
+        self.components = {}     # id -> Component, insertion order
         self.connections = []
-        self.chains = []          # user + line chains
-        self.lines = {}           # name -> Line (insertion ordered)
-        self.owners = []          # owner display names, file order
+        self.chains = []
+        self.lines = {}          # name -> Line
+        self.owners = []         # owner names in file order
         self.warnings = []
-        self._port_use = {}       # (comp_id, port) -> Src of first use
+        self._port_use = {}      # (comp_id, port) -> where it was first used
 
     def add_component(self, comp):
         if comp.id in self.components:
@@ -159,6 +162,7 @@ class Design:
         return self.components[cid]
 
     def use_port(self, ref, src):
+        # make sure nobody double-connects the same port
         prev = self._port_use.get(ref)
         if prev is not None:
             comp = self.components[ref[0]]
@@ -176,10 +180,13 @@ class Design:
         return ref in self._port_use
 
     def plate_names(self):
-        return [p[0] for p in self.plates]
+        names = []
+        for p in self.plates:
+            names.append(p[0])
+        return names
 
     def validate(self):
-        """Post-build checks; appends human-readable warnings."""
+        # check for declared stuff that never got used
         referenced = set()
         for c in self.connections:
             referenced.add(c.a[0])

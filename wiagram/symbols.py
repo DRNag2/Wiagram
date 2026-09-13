@@ -1,8 +1,8 @@
-"""Component symbol geometry and SVG drawing."""
+# drawing the little component symbols
 
 from xml.sax.saxutils import escape
 
-# Base sizes (w, h) in horizontal orientation.
+# (width, height) when drawn horizontally
 SIZES = {
     "attenuator": (30, 14),
     "filter": (36, 16),
@@ -33,6 +33,7 @@ FONT = "Helvetica, Arial, sans-serif"
 
 
 def text_w(s, size):
+    # rough guess of text width, good enough for layout
     return len(s) * size * 0.58
 
 
@@ -41,26 +42,28 @@ def cable_color(cable_comp):
         return DEFAULT_WIRE
     if cable_comp.color:
         return cable_comp.color
-    return CABLE_COLORS.get((cable_comp.note or "").lower(), DEFAULT_WIRE)
+    note = (cable_comp.note or "").lower()
+    return CABLE_COLORS.get(note, DEFAULT_WIRE)
 
 
 def size(comp):
-    """(w, h) of the symbol in its own frame (before orientation)."""
+    # returns (w, h) before we flip for vertical orientation
     if comp.kind in ("experiment", "device"):
         label = comp.display_label()
-        w = max(72.0, text_w(label, 10) + 46)   # room for port name labels
+        w = max(72.0, text_w(label, 10) + 46)  # need room for port labels
         n_side = max(1, len(comp.ports() or ["in"]))
         h = max(34.0, 6 + 13 * ((n_side + 1) // 2))
         return (w, h)
     w, h = SIZES.get(comp.kind, (30, 16))
     if comp.kind in ("attenuator", "filter", "connector", "coupler", "switch",
                      "biastee"):
-        w = max(w, text_w(comp.display_label(), 7) + 8)  # label drawn inside
+        # label goes inside so make the box wide enough
+        w = max(w, text_w(comp.display_label(), 7) + 8)
     return (w, h)
 
 
 def _rot(dx, dy, orient):
-    """Rotate a port offset for vertical (downward-flow) orientation."""
+    # rotate port offset when the component is drawn vertically
     if orient == "v":
         return (dy, dx)
     return (dx, dy)
@@ -73,10 +76,12 @@ def _rot_side(side, orient):
 
 
 def port_offsets(comp):
-    """port -> (dx, dy, side) in horizontal orientation."""
+    # port name -> (dx, dy, side) assuming horizontal orientation
     w, h = size(comp)
-    hw, hh = w / 2.0, h / 2.0
+    hw = w / 2.0
+    hh = h / 2.0
     k = comp.kind
+
     if k == "circulator":
         return {"1": (-hw, 0, "W"), "2": (hw, 0, "E"), "3": (0, hh, "S")}
     if k == "coupler":
@@ -88,70 +93,95 @@ def port_offsets(comp):
         return {"p": (-hw, 0, "W")}
     if k == "node":
         return {"a": (0, 0, "E"), "b": (0, 0, "W")}
+
     if k in ("experiment", "device"):
         ports = comp.ports() or []
         out = {}
-        west = [p for p in ports if comp.port_sides.get(p, "") == "W"]
-        east = [p for p in ports if comp.port_sides.get(p, "") == "E"]
-        south = [p for p in ports if comp.port_sides.get(p, "") == "S"]
-        north = [p for p in ports if comp.port_sides.get(p, "") == "N"]
-        rest = [p for p in ports if p not in west + east + south + north]
-        # default: first unassigned port W, remaining E
+        west = []
+        east = []
+        south = []
+        north = []
+        rest = []
+        for p in ports:
+            side = comp.port_sides.get(p, "")
+            if side == "W":
+                west.append(p)
+            elif side == "E":
+                east.append(p)
+            elif side == "S":
+                south.append(p)
+            elif side == "N":
+                north.append(p)
+            else:
+                rest.append(p)
+        # default: first leftover port on the left, rest on the right
         if rest:
             west = west + rest[:1]
             east = east + rest[1:]
+
         def spread(plist, fixed, along_y):
             n = len(plist)
             for i, p in enumerate(plist):
                 off = (i - (n - 1) / 2.0) * 14
                 if along_y:
-                    out[p] = (fixed, off, "W" if fixed < 0 else "E")
+                    if fixed < 0:
+                        out[p] = (fixed, off, "W")
+                    else:
+                        out[p] = (fixed, off, "E")
                 else:
-                    out[p] = (off, fixed, "N" if fixed < 0 else "S")
+                    if fixed < 0:
+                        out[p] = (off, fixed, "N")
+                    else:
+                        out[p] = (off, fixed, "S")
+
         spread(west, -hw, True)
         spread(east, hw, True)
         spread(south, hh, False)
         spread(north, -hh, False)
         return out
-    # generic two-port
+
+    # normal two-port thing
     return {"in": (-hw, 0, "W"), "out": (hw, 0, "E")}
 
 
 def port_pos(comp, port):
-    """Absolute (x, y, side) of a port, honoring placement and orientation."""
+    # absolute (x, y, side) after placement + orientation
     offs = port_offsets(comp)
     if port not in offs:
-        # dynamic port referenced but not in list (shouldn't happen)
+        # shouldn't really happen but just put it on the right
         offs[port] = (size(comp)[0] / 2.0, 0, "E")
     dx, dy, side = offs[port]
     rx, ry = _rot(dx, dy, comp.orient)
     return (comp.x + rx, comp.y + ry, _rot_side(side, comp.orient))
 
 
-# ---------------------------------------------------------------------------
-# Drawing
-# ---------------------------------------------------------------------------
-
 def _txt(x, y, s, sz=8, anchor="middle", color="#222", bold=False, rotate=None):
     if not s:
         return ""
-    style = ' font-weight="bold"' if bold else ""
-    rot = ' transform="rotate(%g %g %g)"' % (rotate, x, y) if rotate else ""
+    if bold:
+        style = ' font-weight="bold"'
+    else:
+        style = ""
+    if rotate:
+        rot = ' transform="rotate(%g %g %g)"' % (rotate, x, y)
+    else:
+        rot = ""
     return ('<text x="%g" y="%g" font-size="%g" font-family="%s" '
             'text-anchor="%s" fill="%s"%s%s>%s</text>'
             % (x, y, sz, FONT, anchor, color, style, rot, escape(s)))
 
 
 def _label_below(comp, w, h, small=False):
-    """Label + serial next to the symbol."""
+    # label + serial next to / under the symbol
     out = []
     lab = comp.display_label()
     inside_kinds = ("attenuator", "filter", "connector", "coupler", "switch",
                     "biastee")
     if comp.kind in inside_kinds:
-        lab = ""      # label drawn inside the box instead
+        lab = ""  # already drawn inside the box
+
     if comp.zone == "line":
-        # dense line tracks: label sits just right of the symbol, above the wire
+        # lines are packed tight so put the label to the right of the symbol
         x = comp.x + w / 2.0 + 3
         if lab:
             out.append(_txt(x, comp.y - 4, lab, 6.5, anchor="start"))
@@ -159,8 +189,9 @@ def _label_below(comp, w, h, small=False):
             out.append(_txt(x, comp.y + 10, comp.serial, 6, anchor="start",
                             color="#666"))
         return "".join(out)
+
     if comp.kind in ("circulator", "isolator") and comp.zone == "band":
-        # keep labels clear of the port-3 hang wire below the symbol
+        # put labels on the left so they don't hit the hang wire under port 3
         x = comp.x - w / 2.0 - 4
         if lab:
             out.append(_txt(x, comp.y + 4, lab, 7.5, anchor="end"))
@@ -168,9 +199,13 @@ def _label_below(comp, w, h, small=False):
             out.append(_txt(x, comp.y + 13, comp.serial, 6.5, anchor="end",
                             color="#666"))
         return "".join(out)
+
     y = comp.y + h / 2.0 + 8
     if lab and comp.kind not in ("experiment", "device"):
-        out.append(_txt(comp.x, y, lab, 7.5 if small else 8))
+        if small:
+            out.append(_txt(comp.x, y, lab, 7.5))
+        else:
+            out.append(_txt(comp.x, y, lab, 8))
         y += 8
     if comp.serial:
         out.append(_txt(comp.x, y, comp.serial, 6.5, color="#666"))
@@ -181,11 +216,12 @@ def _label_below(comp, w, h, small=False):
 
 
 def draw(comp):
-    """SVG for one placed component."""
+    # svg for one placed component
     w, h = size(comp)
     if comp.orient == "v":
         w, h = h, w
-    x0, y0 = comp.x - w / 2.0, comp.y - h / 2.0
+    x0 = comp.x - w / 2.0
+    y0 = comp.y - h / 2.0
     k = comp.kind
     s = []
 
@@ -219,7 +255,8 @@ def draw(comp):
     elif k == "amplifier":
         if comp.orient == "v":
             pts = "%g,%g %g,%g %g,%g" % (x0, y0, x0 + w, y0, comp.x, y0 + h)
-        elif comp.flip:   # output lines: signal flows right-to-left
+        elif comp.flip:
+            # output lines: signal goes right to left
             pts = "%g,%g %g,%g %g,%g" % (x0 + w, y0, x0 + w, y0 + h, x0, comp.y)
         else:
             pts = "%g,%g %g,%g %g,%g" % (x0, y0, x0, y0 + h, x0 + w, comp.y)
@@ -231,7 +268,7 @@ def draw(comp):
         r = w / 2.0
         s.append('<circle cx="%g" cy="%g" r="%g" fill="#fff" stroke="#8a2be2" '
                  'stroke-width="1.4"/>' % (comp.x, comp.y, r))
-        # rotation arrow
+        # little rotation arrow
         ar = r * 0.52
         s.append('<path d="M %g %g A %g %g 0 1 1 %g %g" fill="none" '
                  'stroke="#8a2be2" stroke-width="1.1"/>'
@@ -256,7 +293,8 @@ def draw(comp):
     elif k == "term":
         s.append('<rect x="%g" y="%g" width="%g" height="%g" '
                  'fill="#333" stroke="#000" stroke-width="1"/>' % (x0, y0, w, h))
-        lx, ly = comp.x, comp.y + h / 2.0 + 8
+        lx = comp.x
+        ly = comp.y + h / 2.0 + 8
         s.append(_txt(lx, ly, comp.display_label(), 7, color="#333"))
 
     elif k == "biastee":
@@ -283,17 +321,26 @@ def draw(comp):
         s.append(_label_below(comp, w, h, small=True))
 
     elif k in ("experiment", "device"):
-        fill = comp.color or ("#dae3f3" if k == "device" else "#fce5cd")
-        stroke = "#2f5597" if k == "device" else "#c55a11"
+        if comp.color:
+            fill = comp.color
+        elif k == "device":
+            fill = "#dae3f3"
+        else:
+            fill = "#fce5cd"
+        if k == "device":
+            stroke = "#2f5597"
+        else:
+            stroke = "#c55a11"
         s.append('<rect x="%g" y="%g" width="%g" height="%g" rx="4" '
                  'fill="%s" stroke="%s" stroke-width="1.4"/>'
                  % (x0, y0, w, h, fill, stroke))
         s.append(_txt(comp.x, comp.y + 3, comp.display_label(), 9, bold=True))
         if comp.serial:
             s.append(_txt(comp.x, y0 + h + 9, comp.serial, 6.5, color="#666"))
-        # port name labels
+        # port names inside the box near each port
         for p, (dx, dy, side) in port_offsets(comp).items():
-            px, py = comp.x + dx, comp.y + dy
+            px = comp.x + dx
+            py = comp.y + dy
             if side == "W":
                 s.append(_txt(px + 3, py + 2.5, p, 6, anchor="start", color="#555"))
             elif side == "E":
@@ -303,6 +350,7 @@ def draw(comp):
             else:
                 s.append(_txt(px, py + 8, p, 6, color="#555"))
     else:
+        # fallback for anything we forgot
         s.append('<rect x="%g" y="%g" width="%g" height="%g" fill="#eee" '
                  'stroke="#666"/>' % (x0, y0, w, h))
         s.append(_label_below(comp, w, h))
@@ -311,7 +359,7 @@ def draw(comp):
 
 
 def legend_symbol(kind, x, y):
-    """Small fixed-size sample glyph for the legend, anchored at (x, y)."""
+    # tiny version of the symbol for the legend box
     s = []
     if kind == "attenuator":
         s.append('<rect x="%g" y="%g" width="28" height="13" rx="2" '

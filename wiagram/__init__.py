@@ -1,4 +1,4 @@
-"""wiagram: dilution-fridge wiring diagrams from human-readable text files."""
+# wiagram turns text wiring files into fridge diagrams
 
 from .model import Design, ParseError
 from .parser import load

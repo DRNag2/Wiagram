@@ -1,26 +1,26 @@
-"""Parser for the wiagram DSL.
-
-File format (one file per owner, plus a shared common.txt):
-
-    owner: Theo                      # top-level metadata
-
-    [device kerrcat]                 # multi-port / named hardware
-    type: experiment
-    label: Kerr-Cat
-    ports: in, out, pump:S
-
-    [cable nb1]
-    type: NbTi
-    serial: ZS20211123-3
-
-    [wiring]
-    In 4 -> eccosorb -> kerrcat.in
-    kerrcat.out -> nb1 -> c24.1
-    c24.2 -> Out B
-    c24.3 -> term
-
-common.txt additionally declares [plates], [template NAME] and [lines].
-"""
+# parser for the wiring text format
+#
+# each person has their own file + there's a shared common.txt
+#
+# example:
+#   owner: Theo
+#
+#   [device kerrcat]
+#   type: experiment
+#   label: Kerr-Cat
+#   ports: in, out, pump:S
+#
+#   [cable nb1]
+#   type: NbTi
+#   serial: ZS20211123-3
+#
+#   [wiring]
+#   In 4 -> eccosorb -> kerrcat.in
+#   kerrcat.out -> nb1 -> c24.1
+#   c24.2 -> Out B
+#   c24.3 -> term
+#
+# common.txt also has [plates], [template ...] and [lines]
 
 import os
 import re
@@ -36,9 +36,8 @@ COMMENT_RE = re.compile(r"(?:^|\s)#.*$")
 RANGE_RE = re.compile(r"^(.*?)(\d+|[A-Z])\s*\.\.\s*(?:(.*?))?(\d+|[A-Z])$")
 CALL_RE = re.compile(r"^([\w-]+)\s*(?:\((.*)\))?$")
 
-# ---------------------------------------------------------------------------
-# Inline component patterns usable directly in chains, e.g. "-20dB", "term(50)"
-# ---------------------------------------------------------------------------
+
+# stuff you can type straight into a chain like "-20dB" or "term(50)"
 
 def _inline_patterns():
     def atten(m, tok):
@@ -73,26 +72,27 @@ def _inline_patterns():
         (r"^iso(?:lator)?(?:\((.*)\))?$",
          lambda m, t: ("isolator", m.group(1) or "", {})),
     ]
-    return [(re.compile(p, re.I), fn) for p, fn in pats]
+    compiled = []
+    for p, fn in pats:
+        compiled.append((re.compile(p, re.I), fn))
+    return compiled
 
 INLINE_PATTERNS = _inline_patterns()
 
 
-# ---------------------------------------------------------------------------
-# Phase 1: raw file parsing
-# ---------------------------------------------------------------------------
+# ---- phase 1: just read the file into a RawFile ----
 
 class RawFile:
     def __init__(self, path):
         self.path = path
         self.name = os.path.basename(path)
         self.meta = {}
-        self.devices = {}    # name -> (dict, Src)
+        self.devices = {}     # name -> (dict, Src)
         self.cables = {}
-        self.templates = {}  # name -> (dict, Src)
-        self.plates = []     # [(name, temp, Src)]
-        self.line_decls = [] # [(name_spec, template, params, Src)]
-        self.chains = []     # [(chain_text, Src)]
+        self.templates = {}   # name -> (dict, Src)
+        self.plates = []      # (name, temp, Src)
+        self.line_decls = []  # (name_spec, template, params, Src)
+        self.chains = []      # (chain_text, Src)
 
 
 def _strip_comment(line):
@@ -101,8 +101,8 @@ def _strip_comment(line):
 
 def parse_file(path):
     raw = RawFile(path)
-    section = None       # None (meta) or (sect_kind, sect_name, dict, Src)
-    pending_chain = None  # (text, Src) for chains continued across lines
+    section = None        # None = still in metadata, else (kind, name, dict, Src)
+    pending_chain = None  # for chains that wrap across lines with ->
 
     with open(path, encoding="utf-8") as f:
         raw_lines = f.readlines()
@@ -122,7 +122,8 @@ def parse_file(path):
         m = SECTION_RE.match(line)
         if m:
             flush_chain()
-            kind, name = m.group(1).lower(), (m.group(2) or "").strip()
+            kind = m.group(1).lower()
+            name = (m.group(2) or "").strip()
             if kind in ("device", "cable", "template"):
                 if not name:
                     raise ParseError("[%s] needs a name, e.g. [%s c24]" % (kind, kind),
@@ -132,8 +133,12 @@ def parse_file(path):
                         "%s name '%s' may not contain spaces, dots or arrows"
                         % (kind, name), raw.name, lineno)
                 d = {}
-                store = {"device": raw.devices, "cable": raw.cables,
-                         "template": raw.templates}[kind]
+                if kind == "device":
+                    store = raw.devices
+                elif kind == "cable":
+                    store = raw.cables
+                else:
+                    store = raw.templates
                 if name in store:
                     raise ParseError("duplicate [%s %s]" % (kind, name), raw.name, lineno)
                 store[name] = (d, src)
@@ -146,6 +151,7 @@ def parse_file(path):
                     "plates, lines or wiring" % kind, raw.name, lineno)
             continue
 
+        # still at the top of the file (metadata)
         if section is None:
             m = KV_RE.match(line)
             if not m:
@@ -158,7 +164,7 @@ def parse_file(path):
         if skind in ("device", "cable", "template"):
             m = KV_RE.match(line)
             if not m:
-                # continuation of a multi-line value (previous line ends in ->)
+                # maybe continuing a value that ended with ->
                 d = section[2]
                 if d:
                     lastkey = list(d)[-1]
@@ -168,7 +174,8 @@ def parse_file(path):
                         continue
                 raise ParseError("expected 'key: value' inside [%s %s]"
                                  % (skind, section[1]), raw.name, lineno)
-            section[2][m.group(1).strip().lower()] = (m.group(2).strip(), src)
+            key = m.group(1).strip().lower()
+            section[2][key] = (m.group(2).strip(), src)
         elif skind == "plates":
             m = KV_RE.match(line)
             if not m:
@@ -180,7 +187,8 @@ def parse_file(path):
                 raise ParseError(
                     "expected 'Line name: template' or 'In 1..In 24: template'",
                     raw.name, lineno)
-            spec, rhs = m.group(1).strip(), m.group(2).strip()
+            spec = m.group(1).strip()
+            rhs = m.group(2).strip()
             cm = CALL_RE.match(rhs)
             if not cm:
                 raise ParseError("bad template reference '%s'" % rhs, raw.name, lineno)
@@ -195,6 +203,7 @@ def parse_file(path):
                     params[k.strip()] = v.strip()
             raw.line_decls.append((spec, cm.group(1), params, src))
         elif skind == "wiring":
+            # glue onto previous line if they left a trailing ->
             if pending_chain is not None:
                 text = pending_chain[0] + " " + line
                 pending_chain = (text, pending_chain[1])
@@ -207,12 +216,11 @@ def parse_file(path):
     return raw
 
 
-# ---------------------------------------------------------------------------
-# Phase 2: build the Design
-# ---------------------------------------------------------------------------
+# ---- phase 2: turn RawFiles into a Design ----
 
 def expand_range(spec, src):
-    """'In 1..In 24' -> ['In 1', ..., 'In 24']; single names pass through."""
+    # "In 1..In 24" -> ["In 1", ..., "In 24"]
+    # single names just come back as a one-element list
     if ".." not in spec:
         return [spec]
     m = RANGE_RE.match(spec)
@@ -226,27 +234,35 @@ def expand_range(spec, src):
         raise ParseError("range endpoints must both be numbers or both letters: '%s'"
                          % spec, src.file, src.line)
     if s1.isdigit():
-        lo, hi = int(s1), int(s2)
+        lo = int(s1)
+        hi = int(s2)
         if hi < lo:
             raise ParseError("range is backwards: '%s'" % spec, src.file, src.line)
-        return ["%s%d" % (pre1, i) for i in range(lo, hi + 1)]
-    lo, hi = ord(s1), ord(s2)
+        out = []
+        for i in range(lo, hi + 1):
+            out.append("%s%d" % (pre1, i))
+        return out
+    lo = ord(s1)
+    hi = ord(s2)
     if hi < lo:
         raise ParseError("range is backwards: '%s'" % spec, src.file, src.line)
-    return ["%s%s" % (pre1, chr(i)) for i in range(lo, hi + 1)]
+    out = []
+    for i in range(lo, hi + 1):
+        out.append("%s%s" % (pre1, chr(i)))
+    return out
 
 
 def _get(d, key, default=""):
     v = d.get(key)
-    return v[0] if v else default
+    if v:
+        return v[0]
+    return default
 
 
 class Builder:
     def __init__(self):
         self.design = Design()
         self.anon_counter = 0
-
-    # -- declared components -------------------------------------------------
 
     def make_device(self, rawfile, owner, name, d, src):
         typ = _get(d, "type").lower()
@@ -265,12 +281,14 @@ class Builder:
             note=_get(d, "note"), src=src)
         ports_val = _get(d, "ports")
         if ports_val:
-            plist, sides = [], {}
+            plist = []
+            sides = {}
             for p in ports_val.split(","):
                 p = p.strip()
                 if ":" in p:
                     pname, side = p.split(":", 1)
-                    pname, side = pname.strip(), side.strip().upper()
+                    pname = pname.strip()
+                    side = side.strip().upper()
                     if side not in ("W", "E", "N", "S"):
                         raise ParseError("port side must be W, E, N or S: '%s'" % p,
                                          src.file, src.line)
@@ -289,7 +307,8 @@ class Builder:
             id="%s:%s" % (owner, name), kind="cable", name=name,
             label=_get(d, "label"), serial=_get(d, "serial"),
             owner=owner, color=_get(d, "color"), src=src)
-        comp.note = _get(d, "type")   # cable material/type lives in note
+        # stash the cable type/material in note (a bit hacky but works)
+        comp.note = _get(d, "type")
         return self.design.add_component(comp)
 
     def check_plate(self, plate, src):
@@ -299,33 +318,36 @@ class Builder:
                 % (plate, ", ".join(self.design.plate_names())),
                 src.file, src.line)
 
-    # -- chain walking ---------------------------------------------------------
-
     def resolve_token(self, tok, ctx, src):
-        """Return ('comp', Component, explicit_port|None) or ('cable', Component)
-        or ('line', Line)."""
+        # returns ('comp', Component, port_or_None)
+        #      or ('cable', Component, None)
+        #      or ('line', Line, None)
         tok = tok.strip()
         if not tok:
             raise ParseError("empty chain element (double arrow '-> ->'?)",
                              src.file, src.line)
+
         plate = ""
         if "@" in tok:
             base, plate = tok.rsplit("@", 1)
-            tok, plate = base.strip(), plate.strip()
+            tok = base.strip()
+            plate = plate.strip()
             self.check_plate(plate, src)
 
-        # line reference
+        # is it a fridge line?
         if tok in self.design.lines:
             if plate:
                 raise ParseError("line '%s' cannot take a plate anchor" % tok,
                                  src.file, src.line)
             return ("line", self.design.lines[tok], None)
 
-        # declared name (with optional .port)
-        name, port = tok, None
+        # declared device/cable, maybe with .port
+        name = tok
+        port = None
         if "." in tok:
             name, port = tok.split(".", 1)
-            name, port = name.strip(), port.strip()
+            name = name.strip()
+            port = port.strip()
         dev = ctx["devices"].get(name)
         if dev is not None:
             comp = self.design.components[dev]
@@ -344,7 +366,7 @@ class Builder:
                 "unknown device '%s' (declare it with [device %s])" % (name, name),
                 src.file, src.line)
 
-        # inline patterns
+        # try the inline patterns (-20dB, hemt, etc)
         for pat, fn in INLINE_PATTERNS:
             m = pat.match(tok)
             if m:
@@ -357,10 +379,15 @@ class Builder:
                 if kind == "cable":
                     comp.note = params.get("type", "")
                 self.design.add_component(comp)
-                return ("cable" if kind == "cable" else "comp", comp, None)
+                if kind == "cable":
+                    return ("cable", comp, None)
+                return ("comp", comp, None)
 
         known = sorted(ctx["devices"])
-        hint = ("; declared here: %s" % ", ".join(known)) if known else ""
+        if known:
+            hint = "; declared here: %s" % ", ".join(known)
+        else:
+            hint = ""
         raise ParseError(
             "cannot understand '%s': not a line, declared device, or inline "
             "component like -20dB, eccosorb, term, hemt(A1), bulkhead, "
@@ -397,9 +424,11 @@ class Builder:
             src.file, src.line)
 
     def exit_port(self, comp, entered, explicit, src):
-        """Port used to continue the chain after this component."""
+        # which port do we leave on to keep going down the chain
         if comp.kind in TWO_PORT_KINDS:
-            return "out" if entered != "out" else "in"
+            if entered != "out":
+                return "out"
+            return "in"
         if comp.kind == "node":
             return "b"
         if comp.kind in AUTO_THROUGH and explicit is None:
@@ -413,22 +442,21 @@ class Builder:
             src.file, src.line)
 
     def walk_chain(self, chain_text, ctx, src, line_name=""):
-        """Parse one arrow chain, creating components and connections.
-
-        Returns (Chain, open_out_portref_or_None).
-        """
+        # parse one arrow chain and make the connections
+        # returns (Chain, open_out_portref_or_None, trailing_cable_or_None)
         tokens = [t for t in chain_text.split("->")]
         if len(tokens) < 2 and not line_name:
             raise ParseError("a chain needs at least two elements joined by ->",
                              src.file, src.line)
         chain = Chain(owner=ctx["owner"], line=line_name, src=src)
-        prev_out = ctx.get("start_port")   # line templates start at the start node
+        prev_out = ctx.get("start_port")  # line templates start at the start node
         if prev_out is not None:
             chain.comps.append(prev_out[0])
         pending_cable = None
 
         for i, tok in enumerate(tokens):
             res = self.resolve_token(tok, ctx, src)
+
             if res[0] == "cable":
                 if pending_cable is not None:
                     raise ParseError(
@@ -442,10 +470,12 @@ class Builder:
                 continue
 
             last = (i == len(tokens) - 1)
+
             if res[0] == "line":
                 ln = res[1]
                 end_comp = self.design.components[ln.end_id]
-                if prev_out is None:            # chain starts at a line
+                if prev_out is None:
+                    # chain starts at a line
                     prev_out = (end_comp.id, "a")
                     chain.comps.append(end_comp.id)
                     continue
@@ -462,9 +492,11 @@ class Builder:
                 prev_out = None
                 continue
 
-            comp, explicit = res[1], res[2]
+            comp = res[1]
+            explicit = res[2]
+
             if prev_out is None:
-                # first element: acts as a source
+                # first thing in the chain = the source
                 if explicit:
                     out = explicit
                 elif comp.kind in TWO_PORT_KINDS:
@@ -489,8 +521,9 @@ class Builder:
             chain.comps.append(comp.id)
             if last:
                 prev_out = None
+                # open end on a two-port so we can still connect to a node later
                 if comp.kind in TWO_PORT_KINDS and not explicit:
-                    prev_out = (comp.id, "out")   # open end, may continue to node
+                    prev_out = (comp.id, "out")
             else:
                 prev_out = (comp.id, self.exit_port(comp, entry, explicit, src))
 
@@ -501,10 +534,11 @@ class Builder:
         return chain, prev_out, pending_cable
 
     def connect(self, a, b, cable, owner, src):
+        cid = None
+        if cable:
+            cid = cable.id
         self.design.connections.append(Connection(
-            a=a, b=b, cable_id=cable.id if cable else None, owner=owner, src=src))
-
-    # -- lines -----------------------------------------------------------------
+            a=a, b=b, cable_id=cid, owner=owner, src=src))
 
     def instantiate_line(self, name, tmpl_name, params, templates, ctx_common, src):
         if name in self.design.lines:
@@ -519,7 +553,8 @@ class Builder:
         if not chain_text:
             raise ParseError("[template %s] has no 'chain:'" % tmpl_name,
                              tsrc.file, tsrc.line)
-        # parameter substitution
+
+        # replace {param} with whatever they passed in
         def sub(m):
             k = m.group(1)
             if k not in params:
@@ -555,12 +590,15 @@ class Builder:
 
 
 def build(rawfiles):
-    """rawfiles: list of RawFile, common first."""
+    # rawfiles should have common.txt first
     b = Builder()
     design = b.design
 
-    # plates (exactly one file may declare them)
-    plate_files = [rf for rf in rawfiles if rf.plates]
+    # plates - only one file should declare them
+    plate_files = []
+    for rf in rawfiles:
+        if rf.plates:
+            plate_files.append(rf)
     if not plate_files:
         raise ParseError("no [plates] section found in any file; common.txt "
                          "must declare the temperature plates")
@@ -574,13 +612,16 @@ def build(rawfiles):
 
     # metadata / owners
     for rf in rawfiles:
-        owner = rf.meta.get("owner") or os.path.splitext(rf.name)[0].capitalize()
+        owner = rf.meta.get("owner")
+        if not owner:
+            owner = os.path.splitext(rf.name)[0].capitalize()
         rf.owner = owner
         design.owners.append(owner)
         for k, v in rf.meta.items():
-            design.meta.setdefault(k, v)
+            if k not in design.meta:
+                design.meta[k] = v
 
-    # devices & cables (file-scoped names)
+    # devices & cables (names are per-file)
     contexts = {}
     for rf in rawfiles:
         devices = {}
@@ -593,7 +634,7 @@ def build(rawfiles):
             devices[name] = b.make_cable(rf, rf.owner, name, d, src).id
         contexts[rf.name] = {"owner": rf.owner, "devices": devices}
 
-    # templates (global registry)
+    # templates are global
     templates = {}
     for rf in rawfiles:
         for name, (d, src) in rf.templates.items():
@@ -602,14 +643,14 @@ def build(rawfiles):
                                  % name, src.file, src.line)
             templates[name] = (d, src)
 
-    # lines
+    # instantiate the lines from [lines]
     for rf in rawfiles:
         ctx = contexts[rf.name]
         for spec, tmpl, params, src in rf.line_decls:
             for lname in expand_range(spec, src):
                 b.instantiate_line(lname, tmpl, params, templates, ctx, src)
 
-    # wiring chains
+    # then the [wiring] chains
     for rf in rawfiles:
         ctx = contexts[rf.name]
         for text, src in rf.chains:
@@ -620,21 +661,23 @@ def build(rawfiles):
 
 
 def load(paths, common_name="common.txt"):
-    """Load a directory or explicit list of .txt files into a Design."""
+    # paths can be a dir or a list of files
     if isinstance(paths, str):
         paths = [paths]
     files = []
     for p in paths:
         if os.path.isdir(p):
-            files.extend(sorted(
-                os.path.join(p, f) for f in os.listdir(p)
-                if f.endswith(".txt") and not f.startswith(".")))
+            for f in sorted(os.listdir(p)):
+                if f.endswith(".txt") and not f.startswith("."):
+                    files.append(os.path.join(p, f))
         else:
             files.append(p)
     if not files:
         raise ParseError("no .txt wiring files found in %s" % ", ".join(paths))
-    # common file first
+    # put common.txt first so plates/templates exist before other files
     files.sort(key=lambda f: (os.path.basename(f) != common_name,
                               os.path.basename(f)))
-    rawfiles = [parse_file(f) for f in files]
+    rawfiles = []
+    for f in files:
+        rawfiles.append(parse_file(f))
     return build(rawfiles)

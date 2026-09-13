@@ -1,4 +1,4 @@
-"""Command-line interface: wiagram build / check."""
+# command line: wiagram build / check
 
 import argparse
 import os
@@ -38,15 +38,23 @@ def main(argv=None):
 
     if args.cmd == "check":
         n_lines = len(design.lines)
-        n_comps = sum(1 for c in design.components.values() if c.kind != "node")
+        n_comps = 0
+        for c in design.components.values():
+            if c.kind != "node":
+                n_comps += 1
         print("OK: %d lines, %d components, %d connections, %d warning(s)"
               % (n_lines, n_comps, len(design.connections), len(design.warnings)))
         return 0
 
+    # figure out where to write the svg
     out = args.out
     if not out:
-        base = args.paths[0] if os.path.isdir(args.paths[0]) else "."
+        if os.path.isdir(args.paths[0]):
+            base = args.paths[0]
+        else:
+            base = "."
         out = os.path.join(base, "wiring.svg")
+
     svg = render_svg(design)
     with open(out, "w", encoding="utf-8") as f:
         f.write(svg)

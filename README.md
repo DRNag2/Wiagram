@@ -1,28 +1,67 @@
 # Wiagram
 
-Dilution-fridge wiring diagrams from human-readable text files.
+Turn plain-text fridge wiring files into one SVG diagram.
 
-Everyone keeps their own wiring file (`theo.txt`, `haley.txt`, ...) next to a
-shared `common.txt`; the engine merges them and renders one clean SVG diagram
-of the whole fridge. Because the inputs are plain text, wiring changes are
-tracked in git like code, and nobody fights over a LibreOffice file lock.
+Each person keeps their own file (`theo.txt`, `haley.txt`, …) next to a shared
+`common.txt`. Wiagram merges them and draws the whole fridge. Wiring changes
+live in git like code — no LibreOffice lock fights.
 
-## Quick start
+## Install / run
+
+No install step. From the repo root:
+
+```bash
+python3 -m wiagram check example/                 # validate only
+python3 -m wiagram build example/                 # writes example/wiring.svg
+python3 -m wiagram build example/ -o out.svg      # choose the SVG path
+python3 -m wiagram build example/ --pdf out.pdf   # SVG + PDF (needs cairosvg)
+```
+
+Optional PDF support:
+
+```bash
+pip install cairosvg
+```
+
+You can pass a directory of `.txt` files, or list files explicitly:
+
+```bash
+python3 -m wiagram build example/common.txt example/theo.txt -o theo.svg
+```
+
+`common.txt` is always loaded first when it is among the inputs.
+
+| Command | What it does |
+|---------|----------------|
+| `check` | Parse and validate. Prints counts; exits `1` on errors. |
+| `build` | Same as check, then writes an SVG (and optional PDF). |
+
+## File layout
+
+A typical fridge folder looks like:
 
 ```
-python3 -m wiagram build example/ -o example/wiring.svg
-python3 -m wiagram check example/            # validate only
-python3 -m wiagram build example/ --pdf example/wiring.pdf   # needs: pip install cairosvg
+fridge/
+  common.txt    # plates, line templates, line list (shared)
+  theo.txt      # Theo's devices + wiring
+  haley.txt     # Haley's devices + wiring
 ```
 
-No required dependencies (pure standard library). `cairosvg` is optional, for
-PDF output.
+Then:
 
-## Writing a wiring file
+```bash
+python3 -m wiagram build fridge/ -o fridge/wiring.svg
+```
 
-A file has optional metadata at the top, declarations, and a `[wiring]`
-section of chains. Chains read left to right, from the fridge line toward
-your experiment:
+## Your wiring file
+
+Minimal shape:
+
+1. Optional metadata (`owner: …`)
+2. `[device …]` / `[cable …]` declarations
+3. A `[wiring]` section of arrow chains
+
+Example (`theo.txt`-style):
 
 ```
 owner: Theo
@@ -50,35 +89,78 @@ c24.2 -> Out B
 c24.3 -> term
 ```
 
-Rules of thumb:
+Chains read **left → right**: fridge line toward your experiment (or back out
+to an output line).
 
-- **Fridge lines** (`In 1`...`In 24`, `Out A`...`Out H`, `DC A`...) come from
-  `common.txt` and can start or end a chain. A line can only be claimed once
-  across all files -- the build fails with a clear error if two people use
-  `In 4`.
-- **Simple two-port parts** are written inline, no declaration needed:
-  `-20dB`, `0dB`, `eccosorb`, `knl`, `lp(12GHz)`, `filter(anything)`,
-  `hemt(A1)`, `amp(SPA)`, `iso`, `bulkhead`, `db25`, `fischer`, `sma`,
-  `term`, `term(50)`, `cable(NbTi)`, `biastee`.
-- `@Plate` anchors a part to a plate label (e.g. `-10dB@MXC`).
-- **Multi-port devices** (circulators, couplers, experiments) are declared
-  once as `[device name]` and referenced by port from as many chains as
-  needed: `c24.1`, `c24.2`, `c24.3`. Circulator ports are `1/2/3`; coupler
-  ports are `in/out/cpl/iso`; bias tees are `rf/dc/out`; experiments declare
-  their own `ports:` (with optional `:W/:E/:N/:S` side hints).
-- **Cables** with serial numbers are declared as `[cable name]` with a
-  `type:` (`copper`, `SS`, `NbTi`, `premade`, ...) that sets the wire color,
-  and are placed between two parts in a chain: `kc.out -> nb1 -> c24.1`.
-- A chain may span several text lines if each continued line ends with `->`.
-- `#` starts a comment.
+### What can appear in a chain?
 
-## common.txt
+| Kind | How to write it | Notes |
+|------|-----------------|--------|
+| Fridge line | `In 1`, `Out B`, `DC A` | Defined in `common.txt`. Each line can be used **once** across all files. |
+| Inline 2-port | `-20dB`, `knl`, `hemt(A1)`, … | No declaration needed. |
+| Plate anchor | `-10dB@MXC` | Pins that part to a plate column. |
+| Declared device | `cavity.ro_in`, `c24.1` | Use `name.port`. |
+| Declared cable | `… -> nb1 -> …` | Goes between two components. |
 
-Declares what rarely changes: `[plates]`, line `[template]`s and `[lines]`.
-Templates keep 24 identical input lines to a few text lines, with `{param}`
-substitution for per-line differences:
+Inline parts you can type directly:
 
 ```
+-20dB   0dB   eccosorb   knl   lp(12GHz)   hp(...)   bp(...)
+filter(anything)   hemt(A1)   amp(SPA)   iso   isolator
+bulkhead   db25   fischer   sma   term   term(50)
+cable(NbTi)   biastee   circ(C24)   coupler
+```
+
+`#` starts a comment. A chain can wrap across lines if the continued line
+ends with `->`.
+
+### Declaring devices and cables
+
+**Devices** (multi-port or anything you want named):
+
+```
+[device name]
+type: circulator | isolator | coupler | biastee | experiment | …
+label: optional display name
+serial: optional
+plate: MXC          # optional default plate
+ports: a:W, b:E     # required for experiment/device; optional :W/:E/:N/:S
+```
+
+Default ports if you do not list them:
+
+- circulator → `1`, `2`, `3`
+- coupler → `in`, `out`, `cpl`, `iso`
+- bias tee → `rf`, `dc`, `out`
+- most others → `in`, `out`
+
+**Cables** (for serials / wire color):
+
+```
+[cable nb1]
+type: NbTi          # copper, SS, NbTi, premade, flex, loom, …
+serial: ZS20211123-3
+```
+
+Use the cable name between two parts: `cavity.ro_out -> nb1 -> c24.1`.
+
+## `common.txt` (shared fridge)
+
+Holds things that rarely change: temperature plates, line templates, and the
+list of fridge lines.
+
+```
+owner: Common
+fridge: Bluefors Dilution Fridge
+
+[plates]
+Top: 300K
+77K: 77K
+4K: 4K
+Still: 800mK
+Cold: 100mK
+MXC: 20mK
+
 [template input_line]
 group: Inputs
 chain: bulkhead@Top -> cable(SS) -> bulkhead@77K -> cable(SS) -> bulkhead@4K ->
@@ -89,28 +171,29 @@ In 1..In 15: input_line(still=-10dB)
 In 16..In 24: input_line(still=0dB)
 ```
 
-`direction: out` in a template flips amplifier symbols for lines whose signal
-flows out of the fridge.
+- `[plates]` — vertical plate bars on the diagram (names used by `@Plate`).
+- `[template name]` — reusable chain; `{param}` is filled in per line.
+- `[lines]` — creates each fridge line from a template. Ranges work:
+  `In 1..In 24`, `Out A..Out H`, `DC A..DC C`.
+- `direction: out` on a template flips amplifier symbols for outgoing lines.
+- `group:` controls vertical grouping (Outputs / DC / Inputs).
 
-## Layout
+See `example/common.txt` for a full fridge.
 
-The renderer draws the familiar layout of our hand-made diagrams: plates as
-vertical bars with signal flowing left to right, output lines on top, DC
-looms in the middle, input lines at the bottom, and one tinted band per owner
-to the right of the MXC plate. Within a band, every `[wiring]` chain gets its
-own row; a chain that continues from the previous chain's rightmost component
-stays on the same row, and a chain hanging off a downward port (for example a
-circulator's port 3 to a termination) drops below it. Layout is
-deterministic: the same text always produces the same diagram.
+## What the diagram looks like
 
-## Regenerating common.txt from an old ODG diagram
+- **Left:** fridge lines as horizontal tracks, plates as vertical bars.
+- **Right:** one tinted band per owner; each `[wiring]` chain is a row.
+- Chains that continue from the previous chain’s rightmost part stay on the
+  same row; a hang off a downward port (e.g. circulator `3` → `term`) drops
+  below.
+- Same text always produces the same layout.
 
-`tools/extract_odg.py` mines a LibreOffice Draw diagram for its rows of
-shapes and prints a draft:
+## Migrating from an old LibreOffice `.odg`
 
-```
-python3 tools/extract_odg.py wiring_diagram.odg          # readable report
+```bash
+python3 tools/extract_odg.py wiring_diagram.odg          # human-readable dump
 python3 tools/extract_odg.py wiring_diagram.odg --draft  # draft common.txt
 ```
 
-The draft needs proofreading -- it is a starting point, not gospel.
+The draft is a starting point — proofread before using it.

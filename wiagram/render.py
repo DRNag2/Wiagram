@@ -1,4 +1,4 @@
-"""SVG rendering of a laid-out Design."""
+# turn a laid-out Design into an SVG string
 
 from xml.sax.saxutils import escape
 
@@ -7,6 +7,7 @@ from .layout import LayoutData, layout
 from .model import Design
 
 WIRE_W = 1.4
+
 LEGEND_KINDS = [
     ("attenuator", "Attenuator"),
     ("filter", "Filter"),
@@ -25,34 +26,52 @@ LEGEND_KINDS = [
 def _txt(x, y, s, sz=9, anchor="start", color="#222", bold=False, rotate=None):
     if not s:
         return ""
-    style = ' font-weight="bold"' if bold else ""
-    rot = ' transform="rotate(%g %g %g)"' % (rotate, x, y) if rotate else ""
+    if bold:
+        style = ' font-weight="bold"'
+    else:
+        style = ""
+    if rotate:
+        rot = ' transform="rotate(%g %g %g)"' % (rotate, x, y)
+    else:
+        rot = ""
     return ('<text x="%g" y="%g" font-size="%g" font-family="%s" '
             'text-anchor="%s" fill="%s"%s%s>%s</text>\n'
             % (x, y, sz, symbols.FONT, anchor, color, style, rot, escape(s)))
 
 
 def _wire(conn, design):
-    cable = design.components.get(conn.cable_id) if conn.cable_id else None
+    if conn.cable_id:
+        cable = design.components.get(conn.cable_id)
+    else:
+        cable = None
     color = symbols.cable_color(cable)
     pts = " ".join("%g,%g" % (p[0], p[1]) for p in conn.points)
     out = ['<polyline points="%s" fill="none" stroke="%s" stroke-width="%g" '
            'stroke-linejoin="round"/>\n' % (pts, color, WIRE_W)]
-    # cable label at the midpoint of the longest segment; inside the line zone
-    # the color already encodes the type, so only serials/labels are printed
+
+    # put the cable label on the longest segment
+    # in the line zone the color already tells you the type so we only
+    # print serials/labels there
     in_line_zone = (design.components[conn.a[0]].zone == "line" and
                     design.components[conn.b[0]].zone == "line")
-    show = (cable.serial or cable.label) if cable else None
+    if cable:
+        show = cable.serial or cable.label
+    else:
+        show = None
     if in_line_zone and cable and not show:
         return "".join(out)
+
     if cable and (cable.serial or cable.label or cable.note):
-        best, blen = None, -1
+        best = None
+        blen = -1
         for i in range(len(conn.points) - 1):
-            (x1, y1), (x2, y2) = conn.points[i], conn.points[i + 1]
+            x1, y1 = conn.points[i]
+            x2, y2 = conn.points[i + 1]
             ln = abs(x2 - x1) + abs(y2 - y1)
             if ln > blen:
-                blen, best = ln, ((x1 + x2) / 2.0, (y1 + y2) / 2.0,
-                                  abs(x2 - x1) >= abs(y2 - y1))
+                blen = ln
+                horiz = abs(x2 - x1) >= abs(y2 - y1)
+                best = ((x1 + x2) / 2.0, (y1 + y2) / 2.0, horiz)
         if best:
             mx, my, horiz = best
             label = cable.serial or cable.label or cable.note
@@ -66,28 +85,42 @@ def _wire(conn, design):
 
 
 def _legend(design, ld):
-    """Legend box; returns (svg, height_used)."""
-    used_kinds = {c.kind for c in design.components.values()}
-    kinds = [(k, lab) for k, lab in LEGEND_KINDS if k in used_kinds]
+    # returns (svg_string, height_used)
+    used_kinds = set()
+    for c in design.components.values():
+        used_kinds.add(c.kind)
+    kinds = []
+    for k, lab in LEGEND_KINDS:
+        if k in used_kinds:
+            kinds.append((k, lab))
+
     cable_types = []
     for c in design.components.values():
         if c.kind == "cable" and c.note:
             key = c.note.lower()
-            if key not in [t[0] for t in cable_types]:
+            already = False
+            for t in cable_types:
+                if t[0] == key:
+                    already = True
+                    break
+            if not already:
                 cable_types.append((key, c.note))
 
-    x0, y0 = 20, ld.height + 14
+    x0 = 20
+    y0 = ld.height + 14
     rows = max(len(kinds), len(cable_types) + 1)
     h = 26 + rows * 22
     w = 420
     s = ['<rect x="%g" y="%g" width="%g" height="%g" fill="#fafafa" '
          'stroke="#999" rx="4"/>\n' % (x0, y0, w, h)]
     s.append(_txt(x0 + 10, y0 + 16, "Legend", 10, bold=True))
+
     yy = y0 + 38
     for kind, lab in kinds:
         s.append(symbols.legend_symbol(kind, x0 + 14, yy))
         s.append(_txt(x0 + 64, yy + 3, lab, 8.5))
         yy += 22
+
     yy = y0 + 38
     cx = x0 + 210
     s.append(_txt(cx, yy - 12, "Cables", 8.5, bold=True))
@@ -110,7 +143,7 @@ def render_svg(design: Design, ld: LayoutData = None) -> str:
 
     body = []
 
-    # owner bands (bottom layer)
+    # owner bands underneath everything
     for owner, x0, y0, x1, y1, fill in ld.bands:
         body.append('<rect x="%g" y="%g" width="%g" height="%g" rx="6" '
                     'fill="%s" stroke="#c9b99a" stroke-width="0.8"/>\n'
@@ -130,12 +163,12 @@ def render_svg(design: Design, ld: LayoutData = None) -> str:
         if conn.points:
             body.append(_wire(conn, design))
 
-    # components
+    # components (skip the invisible nodes)
     for comp in design.components.values():
         if comp.placed and comp.kind != "node":
             body.append(symbols.draw(comp))
 
-    # line name labels
+    # line name labels on the left
     for x, y, name in ld.line_labels:
         body.append(_txt(x, y, name, 8.5, anchor="end", bold=True, color="#333"))
 
@@ -148,7 +181,8 @@ def render_svg(design: Design, ld: LayoutData = None) -> str:
     legend_svg, legend_h = _legend(design, ld)
     body.append(legend_svg)
 
-    W, H = ld.width, ld.height + legend_h
+    W = ld.width
+    H = ld.height + legend_h
     head = ('<svg xmlns="http://www.w3.org/2000/svg" width="%g" height="%g" '
             'viewBox="0 0 %g %g">\n<rect width="%g" height="%g" fill="white"/>\n'
             % (W, H, W, H, W, H))
