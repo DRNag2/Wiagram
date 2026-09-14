@@ -8,7 +8,7 @@ live in git like code.
 
 ![Example wiring diagram](example/wiring.png)
 
-*Output of `python3 -m wiagram build example/` — fridge lines on the left,
+*Output of `python3 -m wiagram build example/`  fridge lines on the left,
 owner bands on the right.*
 
 ## Install / run
@@ -176,9 +176,9 @@ In 1..In 15: input_line(still=-10dB)
 In 16..In 24: input_line(still=0dB)
 ```
 
-- `[plates]` — vertical plate bars on the diagram (names used by `@Plate`).
-- `[template name]` — reusable chain; `{param}` is filled in per line.
-- `[lines]` — creates each fridge line from a template. Ranges work:
+- `[plates]`  vertical plate bars on the diagram (names used by `@Plate`).
+- `[template name]`  reusable chain; `{param}` is filled in per line.
+- `[lines]`  creates each fridge line from a template. Ranges work:
   `In 1..In 24`, `Out A..Out H`, `DC A..DC C`.
 - `direction: out` on a template flips amplifier symbols for outgoing lines.
 - `group:` controls vertical grouping (Outputs / DC / Inputs).
