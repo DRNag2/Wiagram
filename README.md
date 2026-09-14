@@ -1,10 +1,15 @@
 # Wiagram
 
-Turn plain-text fridge wiring files into one SVG diagram.
+Turn plain-text fridge wiring files into one SVG and/or PDF diagram.
 
 Each person keeps their own file (`theo.txt`, `haley.txt`, …) next to a shared
 `common.txt`. Wiagram merges them and draws the whole fridge. Wiring changes
-live in git like code — no LibreOffice lock fights.
+live in git like code.
+
+![Example wiring diagram](example/wiring.png)
+
+*Output of `python3 -m wiagram build example/` — fridge lines on the left,
+owner bands on the right.*
 
 ## Install / run
 
@@ -17,7 +22,7 @@ python3 -m wiagram build example/ -o out.svg      # choose the SVG path
 python3 -m wiagram build example/ --pdf out.pdf   # SVG + PDF (needs cairosvg)
 ```
 
-Optional PDF support:
+For PDF format:
 
 ```bash
 pip install cairosvg
@@ -188,12 +193,3 @@ See `example/common.txt` for a full fridge.
   same row; a hang off a downward port (e.g. circulator `3` → `term`) drops
   below.
 - Same text always produces the same layout.
-
-## Migrating from an old LibreOffice `.odg`
-
-```bash
-python3 tools/extract_odg.py wiring_diagram.odg          # human-readable dump
-python3 tools/extract_odg.py wiring_diagram.odg --draft  # draft common.txt
-```
-
-The draft is a starting point — proofread before using it.
