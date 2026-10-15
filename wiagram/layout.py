@@ -14,11 +14,12 @@ PLATE_X0 = 170
 PLATE_DX = 118
 LINE_PITCH = 20       # how far apart the fridge line tracks are
 GROUP_GAP = 30        # gap between input/output/DC groups
-EXPT_PITCH = 52       # track spacing inside an owner band
+EXPT_PITCH = 70       # track spacing inside an owner band (room for a termination under a circulator)
 BAND_PAD = 26
 BAND_GAP = 26
 CH_GAP = 10           # spacing between vertical routing channels
 STUB = 9
+AWAY_STUB = 22   # longer lead-out when a port faces away from its wire
 COMP_GAP = 24         # space between components in a chain
 HANG_GAP = 34         # space when hanging stuff off a south port
 
@@ -37,13 +38,14 @@ class LayoutData:
 
 
 def _find_connection(design, c0, c1):
-    # first connection between c0 and c1 (either way)
-    for conn in design.connections:
-        if conn.a[0] == c0 and conn.b[0] == c1:
-            return conn, conn.a[1]
-        if conn.b[0] == c0 and conn.a[0] == c1:
-            return conn, conn.b[1]
-    return None, None
+    # first connection between c0 and c1 (either way), and c0's port on it
+    conns = design.connections_between(c0, c1)
+    if not conns:
+        return None, None
+    conn = conns[0]
+    if conn.a[0] == c0:
+        return conn, conn.a[1]
+    return conn, conn.b[1]
 
 
 def _side_of(comp, port):
@@ -194,7 +196,9 @@ def layout(design: Design) -> LayoutData:
                     continue
                 w, h = symbols.size(comp)
                 if j == 0:
-                    hy = hy + HANG_GAP * 0.7 + h / 2.0
+                    # tuck the first part just under the port so it stays
+                    # in the gap above the next track
+                    hy = hy + 4 + h / 2.0
                 else:
                     hy = hy + HANG_GAP + h / 2.0
                 comp.x = hx
@@ -251,9 +255,45 @@ def layout(design: Design) -> LayoutData:
     ld.width = max_x + 30
     ld.height = max(line_zone_bottom, by) + 20
 
+    # turn a circulator around when that puts its ports toward their wires
+    _flip_circulators(design)
+
     # wire routing
     _route_all(design, ld, line_y)
     return ld
+
+
+def _flip_circulators(design):
+    """Mirror a circulator when doing so makes more ports face their neighbour."""
+    for comp in design.components.values():
+        if comp.kind not in ("circulator", "isolator") or not comp.placed:
+            continue
+        plain = _facing_penalty(comp, False, design)
+        flipped = _facing_penalty(comp, True, design)
+        comp.flip = flipped < plain
+
+
+def _facing_penalty(comp, flipped, design):
+    comp.flip = flipped
+    pen = 0
+    for conn in design.connections_of(comp.id):
+        if conn.a[0] == comp.id:
+            port, other_id = conn.a[1], conn.b[0]
+        else:
+            port, other_id = conn.b[1], conn.a[0]
+        other = design.components[other_id]
+        side = symbols.port_pos(comp, port)[2]
+        dx = other.x - comp.x
+        dy = other.y - comp.y
+        if side == "E" and dx < -30:
+            pen += 1
+        elif side == "W" and dx > 30:
+            pen += 1
+        elif side == "S" and dy < -30:
+            pen += 1
+        elif side == "N" and dy > 30:
+            pen += 1
+    return pen
 
 
 # orthogonal routing (manhattan paths between ports)
@@ -318,13 +358,18 @@ def _route(pa, pb, via_x=None):
     eb = sb
 
     # if the stub points the wrong way, jog vertically first so we don't
-    # run the wire back through the component
+    # run the wire back through the component. lead out far enough that the
+    # wire visibly leaves the symbol before it turns.
     if via_x is not None:
         tx_a = via_x
     else:
         tx_a = sb[0]
     if (pa[2] == "E" and tx_a < sa[0] - 0.01) or \
        (pa[2] == "W" and tx_a > sa[0] + 0.01):
+        dx, dy = _DIR[pa[2]]
+        sa = (a[0] + dx * AWAY_STUB, a[1] + dy * AWAY_STUB)
+        pts_a = [a, sa]
+        ea = sa
         if sb[1] > sa[1]:
             lane = sa[1] + JOG
         else:

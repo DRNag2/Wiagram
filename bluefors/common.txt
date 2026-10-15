@@ -1,0 +1,52 @@
+# Shared fridge infrastructure.
+# Extracted from wiring_diagram_bluefors.odg by 'wiagram import'
+
+owner: Common
+fridge: Bluefors Dilution Fridge
+
+[plates]
+Top: 300K
+77K: 77K
+4K: 4K
+Still: 800mK
+Cold: 100mK
+MXC: 20mK
+
+# ---- output lines ---------------------------------------------------------
+
+[template output_amp]
+group: Outputs
+direction: out
+chain: bulkhead@Top -> cable(SS) -> bulkhead@77K -> cable(SS) ->
+       hemt({amp})@4K
+
+[template output_bare]
+group: Outputs
+direction: out
+chain: bulkhead@Top -> cable(SS) -> bulkhead@77K -> cable(SS) -> bulkhead@4K ->
+       cable(NbTi)
+
+# ---- DC looms -------------------------------------------------------------
+
+[template dc_loom]
+group: DC
+chain: fischer -> bulkhead@Top -> db25 -> cable(loom) -> db25@4K
+
+# ---- input lines ----------------------------------------------------------
+
+[template input_line]
+group: Inputs
+chain: bulkhead@Top -> cable(SS) -> bulkhead@77K -> cable(SS) -> bulkhead@4K ->
+       -20dB@4K -> cable(SS) -> bulkhead@Still -> {still}@Still -> cable(SS)
+
+[lines]
+Out A: output_amp(amp=A1)
+Out B: output_amp(amp=A2)
+Out C: output_amp(amp=A3)
+Out D: output_amp(amp=A4)
+Out E: output_amp(amp=A5)
+Out F: output_amp(amp=A6)
+Out G..Out H: output_bare
+DC A..DC C: dc_loom
+In 1..In 15: input_line(still=-10dB)
+In 16..In 24: input_line(still=0dB)

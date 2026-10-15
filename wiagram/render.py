@@ -1,6 +1,8 @@
-# turn a laid-out Design into an SVG string
+# turn a laid-out Design into a PDF / PNG (via an in-memory SVG)
 
 from xml.sax.saxutils import escape
+
+import cairosvg
 
 from . import symbols
 from .layout import LayoutData, layout
@@ -189,10 +191,18 @@ def render_svg(design: Design, ld: LayoutData = None) -> str:
     return head + "".join(body) + "</svg>\n"
 
 
-def render_pdf(svg_text, pdf_path):
-    try:
-        import cairosvg
-    except ImportError:
-        raise RuntimeError(
-            "PDF output needs the optional 'cairosvg' package: pip install cairosvg")
-    cairosvg.svg2pdf(bytestring=svg_text.encode("utf-8"), write_to=pdf_path)
+def render_pdf(svg_text):
+    # PDF bytes for an SVG string
+    return cairosvg.svg2pdf(bytestring=svg_text.encode("utf-8"))
+
+
+def render_png(svg_text):
+    # PNG bytes for an SVG string
+    return cairosvg.svg2png(bytestring=svg_text.encode("utf-8"))
+
+
+def render(design):
+    # everything in memory: (pdf_bytes, png_bytes). nothing is written here
+    # so a failure part way through never leaves half the outputs updated
+    svg = render_svg(design)
+    return render_pdf(svg), render_png(svg)

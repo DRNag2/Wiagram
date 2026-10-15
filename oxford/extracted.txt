@@ -1,0 +1,259 @@
+# MXC-side wiring read from the drawing: every box is a part and
+# every connector / touching box is a wire. Circulator stacks between
+# the HEMTs and the Eccosorb filters are here too, so edit or split
+# this file into per-experiment owner files.
+
+owner: Extracted
+
+[device outa_a]
+type: circulator
+label: OUTA a
+
+[device outa_b]
+type: circulator
+label: OUTA b
+
+[device outa_c]
+type: circulator
+label: OUTA c
+
+[device outb_a]
+type: circulator
+label: OUTB a
+
+[device outb_b]
+type: circulator
+label: OUTB b
+
+[device outb_c]
+type: circulator
+label: OUTB c
+
+[device outc_a]
+type: circulator
+label: OUTC a
+
+[device outc_b]
+type: circulator
+label: OUTC b
+
+[device outc_c]
+type: circulator
+label: OUTC c
+
+[device outd_a]
+type: circulator
+label: OUTD a
+
+[device outd_b]
+type: circulator
+label: OUTD b
+
+[device outd_c]
+type: circulator
+label: OUTD c
+
+[device c3_a]
+type: circulator
+label: C3a
+
+[device c3_b]
+type: circulator
+label: C3b
+
+[device c21_a]
+type: circulator
+label: C21a
+
+[device c21_b]
+type: circulator
+label: C21b
+
+[device c21_c]
+type: circulator
+label: C21c
+
+[device c3_a_2]
+type: circulator
+label: C3a
+
+[device c3_b_2]
+type: circulator
+label: C3b
+
+[device c22_a]
+type: circulator
+label: C22a
+
+[device c22_b]
+type: circulator
+label: C22b
+
+[device c22_c]
+type: circulator
+label: C22c
+
+[device c38_b]
+type: circulator
+label: C38b
+
+[device c38_a]
+type: circulator
+label: C38a
+
+[device kband_a]
+type: circulator
+label: KBANDa
+
+[device kband_b]
+type: circulator
+label: KBANDb
+
+[device c3_a_3]
+type: circulator
+label: C3a
+
+[device c3_b_3]
+type: circulator
+label: C3b
+
+[device c3_a_4]
+type: circulator
+label: C3a
+
+[device c3_b_4]
+type: circulator
+label: C3b
+
+[device c2_a]
+type: circulator
+label: C2a
+
+[device c2_b]
+type: circulator
+label: C2b
+
+[device reinholdthermal]
+type: experiment
+label: Reinhold_Thermal
+ports: RO:S, Q:S
+
+[device utaa]
+type: experiment
+label: UTAA
+ports: out:E
+
+[device nyuinasqubit]
+type: experiment
+label: NYU InAs qubit
+ports: top:N, bottom:S
+
+[device dc]
+type: coupler
+label: DC
+
+[device dc_2]
+type: coupler
+label: DC
+
+[device tunableresonator]
+type: experiment
+label: Tunable Resonator
+ports: in:W
+
+[device dc_3]
+type: coupler
+label: DC
+
+[device utac]
+type: experiment
+label: UTAC
+ports: RO:N, Q:W
+
+[device x2dkerrcatsample]
+type: experiment
+label: 2D Kerr-Cat Sample
+ports: 2:N, 1:W
+
+[device dc_4]
+type: coupler
+label: DC
+
+[wiring]
+In 1 -> -10dB@MXC
+In 2 -> -10dB@MXC -> cable(copper) -> amp(SPA) -> cable(copper) ->
+c38_b.1
+c38_b.2 -> c38_a.2
+c38_a.3 -> reinholdthermal.RO
+In 7 -> -10dB@MXC -> knl -> -20dB -> -10dB -> c38_a.1
+In 9 -> -10dB@MXC -> knl -> -20dB -> -10dB -> reinholdthermal.Q
+In 3 -> -10dB@MXC
+In 4 -> -10dB@MXC -> cable(NbTi) -> dc_2.cpl
+dc_2.in -> cable(copper) -> filter(Ecc 6)@MXC -> cable(copper) ->
+c22_c.1
+c22_c.2 -> c22_b.1
+c22_b.2 -> c22_a.1
+c22_a.2 -> cable(copper) -> Out F
+In 5 -> -10dB@MXC -> knl -> -20dB
+In 6 -> -10dB@MXC -> knl -> -20dB
+In 8 -> -10dB@MXC -> knl -> -20dB -> cable(copper) -> c3_b_3.1
+c3_b_3.3 -> c3_a_3.1
+c3_b_3.2 -> cable(copper) -> tunableresonator.in
+In 10 -> -10dB@MXC -> knl -> -20dB -> cable(copper) -> amp(TWPA)
+In 11 -> -10dB@MXC -> knl -> -20dB -> cable(copper) -> c3_a.1
+c3_a.2 -> c3_b.1
+c3_b.2 -> amp(Amp A3 G22aa)
+In 12 -> -10dB@MXC
+In 13 -> -10dB@MXC -> knl -> -10dB
+In 14 -> -10dB@MXC -> knl -> -10dB
+In 15 -> -10dB@MXC -> -10dB -> lp(42) -> -20dB -> cable(copper) ->
+kband_b.3
+kband_b.2 -> kband_a.1
+kband_b.1 -> cable(copper) -> nyuinasqubit.top
+kband_a.2 -> cable(copper) -> filter(Ecc 7)@MXC -> cable(copper) ->
+iso -> cable(copper) -> Out G
+kband_a.3 -> cable(copper) -> dc.cpl
+In 22 -> -10dB@MXC -> -10dB -> cable(copper) -> nyuinasqubit.bottom
+dc.in -> cable(copper) -> amp(wjpa)
+In 24 -> -20dB@MXC -> cable(copper) -> dc.out
+In 16 -> -10dB@MXC -> knl -> -20dB -> -20dB -> bulkhead ->
+x2dkerrcatsample.1
+x2dkerrcatsample.2 -> bulkhead -> c2_a.1
+c2_a.2 -> c2_b.1
+c2_b.2 -> filter(Ecc 1)@MXC -> cable(copper) -> outa_c.1
+outa_c.2 -> outa_b.1
+outa_b.2 -> outa_a.1
+outa_a.2 -> cable(NbTi) -> Out A
+In 17 -> -3dB@MXC -> knl -> cable(copper) -> dc_3.cpl
+In 18 -> -10dB@MXC -> knl -> -20dB -> cable(copper) -> utac.Q
+utac.RO -> cable(copper) -> filter(Ecc 3)@MXC -> cable(copper) ->
+outc_c.1
+outc_c.2 -> outc_b.1
+outc_b.2 -> outc_a.1
+outc_a.2 -> cable(NbTi) -> Out C
+In 19 -> -10dB@MXC -> dc_4.cpl
+dc_4.out -> amp(Hatlab SPA)
+In 20 -> -10dB@MXC -> knl
+In 21 -> -3dB@MXC -> knl
+In 23 -> -10dB@MXC -> bulkhead
+outb_a.2 -> cable(NbTi) -> Out B
+outb_a.1 -> outb_b.2
+outb_b.1 -> outb_c.2
+outb_c.1 -> cable(copper) -> filter(Ecc 2)@MXC
+outd_a.2 -> cable(NbTi) -> Out D
+outd_a.1 -> outd_b.2
+outd_b.1 -> outd_c.2
+outd_c.1 -> cable(copper) -> filter(Ecc 4)@MXC
+c21_a.2 -> cable(copper) -> Out E
+c21_a.1 -> c21_b.2
+c21_b.1 -> c21_c.2
+utaa.out -> cable(copper) -> filter(Ecc 5)@MXC
+c3_a_2.2 -> c3_b_2.1
+c3_a_4.2 -> c3_b_4.1
+c22_a.3 -> term
+outa_a.3 -> term
+outc_a.3 -> term
+outb_a.3 -> term
+outd_a.3 -> term
+c21_a.3 -> term
+c3_a_2.3 -> term

@@ -1,7 +1,15 @@
 # data structures for the wiring diagram stuff
+#
+# connectivity lives in a networkx MultiGraph on Design.graph:
+#   node  = component id (parts, experiments, line start/end nodes)
+#   edge  = one Connection (port-to-port); cables ride along as edge data
+# design.connections keeps the same Connection objects in file order for
+# routing/rendering; the graph is the index for "what is this hooked to".
 
 from dataclasses import dataclass, field
 from typing import Optional
+
+import networkx as nx
 
 
 class ParseError(Exception):
@@ -20,6 +28,17 @@ class ParseError(Exception):
                 loc = "%s:%d" % (self.file, self.line)
             return "%s: %s" % (loc, self.msg)
         return self.msg
+
+
+class ParseErrors(ParseError):
+    # several ParseErrors at once (one per bad file / line)
+    def __init__(self, errors):
+        self.errors = list(errors)
+        first = self.errors[0]
+        super().__init__(first.msg, first.file, first.line)
+
+    def __str__(self):
+        return "\n".join(str(e) for e in self.errors)
 
 
 @dataclass
@@ -149,35 +168,70 @@ class Design:
         self.lines = {}          # name -> Line
         self.owners = []         # owner names in file order
         self.warnings = []
-        self._port_use = {}      # (comp_id, port) -> where it was first used
+        self.graph = nx.MultiGraph()
 
     def add_component(self, comp):
         if comp.id in self.components:
             raise ParseError("duplicate component id '%s'" % comp.id,
                              comp.src.file, comp.src.line)
         self.components[comp.id] = comp
+        if comp.kind != "cable":
+            # cables are edge data, not nodes
+            self.graph.add_node(comp.id, comp=comp)
         return comp
 
     def comp(self, cid):
         return self.components[cid]
 
-    def use_port(self, ref, src):
-        # make sure nobody double-connects the same port
-        prev = self._port_use.get(ref)
-        if prev is not None:
-            comp = self.components[ref[0]]
-            if comp.kind == "node":
-                what = "line '%s'" % comp.name
-            else:
-                what = "port '%s.%s'" % (comp.name or comp.label or comp.id,
-                                         ref[1])
-            raise ParseError(
-                "%s is already connected (first used at %s:%d)"
-                % (what, prev.file, prev.line), src.file, src.line)
-        self._port_use[ref] = src
+    def port_connection(self, ref):
+        # the Connection already using (comp_id, port), or None
+        cid, port = ref
+        if cid not in self.graph:
+            return None
+        for _u, _v, conn in self.graph.edges(cid, data="conn"):
+            if (conn.a == ref) or (conn.b == ref):
+                return conn
+        return None
 
     def port_used(self, ref):
-        return ref in self._port_use
+        return self.port_connection(ref) is not None
+
+    def _describe_port(self, ref):
+        comp = self.components[ref[0]]
+        if comp.kind == "node":
+            return "line '%s'" % comp.name
+        return "port '%s.%s'" % (comp.name or comp.label or comp.id, ref[1])
+
+    def add_connection(self, conn):
+        # make sure nobody double-connects the same port, then record it in
+        # both the ordered list and the graph
+        for ref in (conn.a, conn.b):
+            prev = self.port_connection(ref)
+            if prev is not None:
+                raise ParseError(
+                    "%s is already connected (first used at %s:%d)"
+                    % (self._describe_port(ref), prev.src.file, prev.src.line),
+                    conn.src.file, conn.src.line)
+        self.connections.append(conn)
+        self.graph.add_edge(conn.a[0], conn.b[0], conn=conn)
+        return conn
+
+    def connections_between(self, c0, c1):
+        # every Connection joining c0 and c1 (either direction), file order
+        data = self.graph.get_edge_data(c0, c1)
+        if not data:
+            return []
+        conns = [d["conn"] for d in data.values()]
+        conns.sort(key=lambda c: self.connections.index(c))
+        return conns
+
+    def connections_of(self, cid):
+        # every Connection touching cid, file order
+        if cid not in self.graph:
+            return []
+        conns = [conn for _u, _v, conn in self.graph.edges(cid, data="conn")]
+        conns.sort(key=lambda c: self.connections.index(c))
+        return conns
 
     def plate_names(self):
         names = []
@@ -186,17 +240,41 @@ class Design:
         return names
 
     def validate(self):
-        # check for declared stuff that never got used
-        referenced = set()
+        # declared stuff that never got used
+        cables_used = set()
         for c in self.connections:
-            referenced.add(c.a[0])
-            referenced.add(c.b[0])
             if c.cable_id:
-                referenced.add(c.cable_id)
+                cables_used.add(c.cable_id)
         for comp in self.components.values():
-            if comp.kind == "node":
+            if comp.kind == "node" or not comp.name:
                 continue
-            if comp.name and comp.id not in referenced:
+            if comp.kind == "cable":
+                unused = comp.id not in cables_used
+            else:
+                unused = self.graph.degree(comp.id) == 0
+            if unused:
                 self.warnings.append(
                     "%s: declared %s '%s' is never used in any [wiring] chain"
                     % (comp.src.file, comp.kind, comp.name))
+
+        # declared devices that are wired up, but only to each other and
+        # never back to a fridge line (probably a typo in a line/device name)
+        line_nodes = set()
+        for ln in self.lines.values():
+            line_nodes.add(ln.start_id)
+            line_nodes.add(ln.end_id)
+        for part in nx.connected_components(self.graph):
+            if len(part) == 1 or part & line_nodes:
+                continue  # singletons are already reported as unused
+            named = []
+            for cid in part:
+                comp = self.components[cid]
+                if comp.name and comp.kind != "node":
+                    named.append(comp)
+            if not named:
+                continue
+            named.sort(key=lambda c: (c.src.file, c.src.line))
+            first = named[0]
+            self.warnings.append(
+                "%s:%d: %s '%s' is not connected to any fridge line"
+                % (first.src.file, first.src.line, first.kind, first.name))

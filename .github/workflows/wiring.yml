@@ -1,0 +1,78 @@
+name: Rebuild wiring diagrams
+
+# Every push that touches a wiring .txt file regenerates wiring.pdf,
+# wiring.png and errors.log in each fridge folder (any folder with a
+# common.txt), refreshes TOOLBOX.md / toolbox.png, and commits the results.
+# Parse errors never fail the job: they are written to <fridge>/errors.log
+# and the previous PDF/PNG are left untouched.
+
+on:
+  push:
+    paths:
+      - "**/*.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# one run at a time per branch: a newer push waits (pending) until the
+# running build has committed, so two jobs never push concurrently
+concurrency:
+  group: wiring-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install networkx cairosvg
+
+      - name: Build every fridge folder
+        run: |
+          for common in */common.txt; do
+            [ -e "$common" ] || continue
+            dir=$(dirname "$common")
+            echo "::group::$dir"
+            python -m wiagram build "$dir" || echo "::warning::$dir has errors, see $dir/errors.log"
+            echo "::endgroup::"
+          done
+
+      - name: Regenerate toolbox
+        run: python -m wiagram toolbox
+
+      - name: Commit outputs
+        run: |
+          git config user.name "wiagram-bot"
+          git config user.email "wiagram-bot@users.noreply.github.com"
+          for f in */wiring.pdf */wiring.png */errors.log TOOLBOX.md toolbox.png; do
+            if [ -e "$f" ]; then git add "$f"; fi
+          done
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+          else
+            git commit -m "Rebuild wiring diagrams [skip ci]"
+            # Runs in this concurrency group are serialized, but a person may
+            # push to the branch while this job runs; rebase onto the new tip
+            # and retry instead of failing with a non-fast-forward push.
+            for attempt in 1 2 3; do
+              if git push; then
+                break
+              fi
+              echo "push rejected (attempt $attempt), rebasing on the branch tip"
+              git fetch origin "$GITHUB_REF_NAME"
+              git rebase "origin/$GITHUB_REF_NAME" || {
+                # generated files only conflict with other generated files:
+                # keep ours, which were built from the newest checkout
+                git checkout --theirs -- . && git add -A && GIT_EDITOR=true git rebase --continue
+              }
+            done
+          fi

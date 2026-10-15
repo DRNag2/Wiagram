@@ -151,6 +151,10 @@ def port_pos(comp, port):
         # shouldn't really happen but just put it on the right
         offs[port] = (size(comp)[0] / 2.0, 0, "E")
     dx, dy, side = offs[port]
+    # circulators get mirrored when their ports face the wrong way
+    if comp.flip and comp.kind in ("circulator", "isolator"):
+        dx = -dx
+        side = {"W": "E", "E": "W", "N": "N", "S": "S"}[side]
     rx, ry = _rot(dx, dy, comp.orient)
     return (comp.x + rx, comp.y + ry, _rot_side(side, comp.orient))
 

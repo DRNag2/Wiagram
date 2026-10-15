@@ -1,0 +1,271 @@
+# MXC-side wiring read from the drawing: every box is a part and
+# every connector / touching box is a wire. Circulator stacks between
+# the HEMTs and the Eccosorb filters are here too, so edit or split
+# this file into per-experiment owner files.
+
+owner: Extracted
+
+[device outa_a]
+type: circulator
+label: OUTA a
+
+[device outa_b]
+type: circulator
+label: OUTA b
+
+[device outa_c]
+type: circulator
+label: OUTA c
+
+[device outb_a]
+type: circulator
+label: OUTB a
+
+[device outb_b]
+type: circulator
+label: OUTB b
+
+[device outb_c]
+type: circulator
+label: OUTB c
+
+[device outc_a]
+type: circulator
+label: OUTC a
+
+[device outc_b]
+type: circulator
+label: OUTC b
+
+[device outc_c]
+type: circulator
+label: OUTC c
+
+[device c19_a]
+type: circulator
+label: C19a
+
+[device c19_b]
+type: circulator
+label: C19b
+
+[device outd_a]
+type: circulator
+label: OUTD a
+
+[device outd_b]
+type: circulator
+label: OUTD b
+
+[device outd_c]
+type: circulator
+label: OUTD c
+
+[device oute_a]
+type: circulator
+label: OUTE a
+
+[device oute_b]
+type: circulator
+label: OUTE b
+
+[device oute_c]
+type: circulator
+label: OUTE c
+
+[device c39_b]
+type: circulator
+label: C39b
+
+[device c39_a]
+type: circulator
+label: C39a
+
+[device outf_a]
+type: circulator
+label: OUTF a
+
+[device outf_b]
+type: circulator
+label: OUTF b
+
+[device outf_c]
+type: circulator
+label: OUTF c
+
+[device c6_a]
+type: circulator
+label: C6a
+
+[device c6_b]
+type: circulator
+label: C6b
+
+[device c6_a_2]
+type: circulator
+label: C6a
+
+[device c6_b_2]
+type: circulator
+label: C6b
+
+[device c20_a]
+type: circulator
+label: C20a
+
+[device c20_b]
+type: circulator
+label: C20b
+
+[device c24_b]
+type: circulator
+label: C24b
+
+[device c24_a]
+type: circulator
+label: C24a
+
+[device c23_a]
+type: circulator
+label: C23a
+
+[device c23_b]
+type: circulator
+label: C23b
+
+[device magcoil]
+type: experiment
+label: Mag coil
+ports: bottom:S
+
+[device postcavity]
+type: experiment
+label: Post Cavity(weak dispersive)
+ports: Readout:N, Storage:S, Qubit:W
+
+[device c2postcavity]
+type: experiment
+label: C2 Post Cavity
+ports: Readout:N, bottom:S, Qubit:W
+
+[device transmon]
+type: experiment
+label: Transmon
+ports: RO:N, Q:W
+
+[device transmon2]
+type: experiment
+label: Transmon 2
+ports: top:N, bottom:S
+
+[device kerrcatsq]
+type: experiment
+label: Kerr-Cat sq
+ports: Q:S, out:E
+
+[device kerrcat]
+type: experiment
+label: Kerr-Cat
+ports: RO:N, Q:S
+
+[device dc]
+type: coupler
+label: DC
+
+[device dc_2]
+type: coupler
+label: DC
+
+[device dc_3]
+type: coupler
+label: DC
+
+[wiring]
+In 1 -> -10dB@MXC -> knl -> -20dB -> -10dB -> cable(copper) -> c23_b.1
+c23_b.2 -> c23_a.1
+In 16 -> -10dB@MXC -> cable(copper) -> amp(SPA) ->
+filter(ZDSS-K10G13G+) -> c23_b.3
+c23_a.2 -> cable(copper) -> c24_a.1
+c23_a.3 -> cable(premade) -> kerrcatsq.out
+c24_a.2 -> c24_b.3
+In 2 -> -3dB@MXC -> knl -> cable(copper) -> kerrcatsq.Q
+In 20 -> -10dB@MXC -> cable(copper) -> amp(SPA) -> filter(ZBSS-10G-S+) ->
+c24_b.1
+c24_b.2 -> cable(NbTi) -> filter(Ecc 2)@MXC -> cable(copper) ->
+outb_c.1
+outb_c.2 -> outb_b.1
+outb_b.2 -> outb_a.1
+outb_a.2 -> cable(NbTi) -> Out B
+In 3 -> -10dB@MXC -> knl -> -10dB -> cable(copper) ->
+c2postcavity.bottom
+c2postcavity.Readout -> cable(copper) -> c6_b.1
+In 9 -> -10dB@MXC -> cable(copper) -> c2postcavity.Qubit
+c6_b.2 -> c6_a.3
+c6_b.3 -> cable(copper) -> -10dB
+In 15 -> -10dB@MXC -> cable(copper) -> amp(SPA) -> c6_a.1
+c6_a.2 -> cable(copper) -> filter(Ecc 3)@MXC -> cable(copper) ->
+outc_c.1
+outc_c.2 -> outc_b.1
+outc_b.2 -> outc_a.1
+outc_a.2 -> cable(NbTi) -> Out C
+In 4 -> -10dB@MXC -> knl -> -20dB -> -10dB -> cable(copper) -> c19_b.1
+c19_b.2 -> c19_a.1
+c19_b.3 -> cable(premade) -> filter(002 IRrr) -> cable(copper) ->
+kerrcat.RO
+c19_a.2 -> cable(copper) -> filter(Ecc 4)@MXC -> cable(copper) ->
+outd_c.1
+kerrcat.Q -> cable(copper) -> filter(003 IR) -> cable(copper) ->
+dc_3.out
+outd_c.2 -> outd_b.1
+dc_3.in -> cable(copper) -> dc_2.out
+In 18 -> 0dB@MXC -> bp(SS) -> cable(copper) -> -10dB -> dc_3.cpl
+outd_b.2 -> outd_a.1
+dc_2.in -> cable(copper) -> dc.out
+In 13 -> -10dB@MXC -> knl -> cable(copper) -> -20dB -> dc_2.cpl
+outd_a.2 -> cable(NbTi) -> Out D
+In 17 -> -20dB@MXC -> lp(SS) -> cable(copper) -> dc.in
+In 19 -> -10dB@MXC -> lp(SS) -> cable(copper) -> -10dB -> dc.cpl
+In 5 -> -10dB@MXC -> knl -> -20dB -> -10dB -> cable(copper) ->
+c6_b_2.3
+c6_b_2.2 -> c6_a_2.3
+c6_b_2.1 -> cable(copper) -> transmon2.top
+In 24 -> -10dB@MXC -> knl -> cable(copper) -> amp(SPA) -> c6_a_2.1
+c6_a_2.2 -> cable(copper) -> filter(Ecc 5)@MXC -> cable(copper) ->
+oute_c.1
+In 6 -> -10dB@MXC -> knl -> -20dB -> -10dB -> cable(copper) ->
+transmon2.bottom
+oute_c.2 -> oute_b.1
+oute_b.2 -> oute_a.1
+oute_a.2 -> cable(NbTi) -> Out E
+In 7 -> -10dB@MXC -> knl -> -20dB -> -10dB -> cable(copper) -> c20_b.1
+c20_b.2 -> c20_a.3
+c20_b.3 -> cable(copper) -> filter(004 IR) -> cable(copper) ->
+transmon.RO
+In 11 -> -10dB@MXC -> cable(copper) -> amp(SPA) -> c20_a.1
+c20_a.2 -> cable(copper) -> filter(Ecc 1)@MXC -> cable(copper) ->
+outa_c.1
+In 10 -> -10dB@MXC -> knl -> cable(copper) -> transmon.Q
+outa_c.2 -> outa_b.1
+outa_b.2 -> outa_a.1
+outa_a.2 -> cable(NbTi) -> Out A
+In 8 -> -10dB@MXC -> knl
+In 12 -> -10dB@MXC -> cable(copper) -> amp(SPA) -> c39_a.1
+c39_a.3 -> c39_b.2
+c39_a.2 -> cable(copper) -> filter(Ecc 6)@MXC -> cable(copper) ->
+outf_c.1
+c39_b.1 -> cable(copper) -> postcavity.Readout
+In 21 -> -10dB@MXC -> knl -> -20dB -> -20dB -> cable(copper) ->
+c39_b.3
+outf_c.2 -> outf_b.1
+In 23 -> -10dB@MXC -> knl -> cable(copper) -> postcavity.Storage
+In 22 -> -10dB@MXC -> knl -> cable(copper) -> postcavity.Qubit
+outf_b.2 -> outf_a.1
+outf_a.2 -> cable(NbTi) -> Out F
+In 14 -> -10dB@MXC -> cable(copper) -> magcoil.bottom
+c24_a.3 -> term
+outb_a.3 -> term
+outc_a.3 -> term
+outd_a.3 -> term
+oute_a.3 -> term
+outa_a.3 -> term
+outf_a.3 -> term

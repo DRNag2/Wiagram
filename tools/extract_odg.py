@@ -1,175 +1,80 @@
 #!/usr/bin/env python3
-"""Pull fridge line info out of an old .odg and print a draft common.txt.
+"""Turn an old LibreOffice Draw .odg into wiagram common.txt.
 
-Needs proofreading!!
+The drawing is mined for plates, fridge lines, attenuators, HEMTs and DC
+looms, then rewritten in the same style as example/common.txt (bulkhead /
+cable backbone, templates, [lines] ranges).
 
 Usage:
-    python3 tools/extract_odg.py wiring_diagram.odg
-    python3 tools/extract_odg.py wiring_diagram.odg --draft
+    python3 tools/extract_odg.py wiring_diagram_bluefors.odg
+    python3 tools/extract_odg.py wiring_diagram_bluefors.odg --draft
+    python3 tools/extract_odg.py wiring_diagram_bluefors.odg -o bluefors/
 """
 
-import re
+import os
 import sys
-import zipfile
-import xml.etree.ElementTree as ET
-from collections import defaultdict
 
-DRAW = "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
-SVG = "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
-
-def cm(v):
-    # convert odg length strings to cm
-    if v is None:
-        return None
-    v = v.strip()
-    for suffix, mul in (("cm", 1.0), ("mm", 0.1), ("in", 2.54), ("pt", 2.54 / 72)):
-        if v.endswith(suffix):
-            return float(v[: -len(suffix)]) * mul
-    return float(v)
+from wiagram.odg import describe, extract  # noqa: E402
 
 
-def all_text(el):
-    bits = []
-    for t in el.itertext():
-        t = t.strip()
-        if t:
-            bits.append(t)
-    return " ".join(bits)
-
-
-def load_shapes(odg_path):
-    z = zipfile.ZipFile(odg_path)
-    root = ET.fromstring(z.read("content.xml"))
-    pages = list(root.iter("{%s}page" % DRAW))
-    shapes = []  # (page, x, y, w, h, text)
-    for pi, page in enumerate(pages):
-        for el in page.iter():
-            tag = el.tag.split("}")[1]
-            if tag not in ("custom-shape", "frame", "rect"):
-                continue
-            x = cm(el.get("{%s}x" % SVG))
-            y = cm(el.get("{%s}y" % SVG))
-            w = cm(el.get("{%s}width" % SVG)) or 0
-            h = cm(el.get("{%s}height" % SVG)) or 0
-            if x is None or y is None:
-                continue
-            # use the center of the shape
-            shapes.append((pi, x + w / 2, y + h / 2, w, h, all_text(el)))
-    return shapes
-
-
-def find_plates(shapes):
-    # plate bars are labeled like "4K Plate"
-    plates = []
-    for pi, x, y, w, h, t in shapes:
-        m = re.match(r"^(.*?)\s*Plate$", t)
-        if m and pi == 0:
-            name = m.group(1) or "Top"
-            plates.append((x, name))
-    plates.sort()
-    return plates
-
-
-def guess_token(text, x, plates):
-    # try to turn a shape label into a wiagram chain token
-    t = text.strip()
-    plate = ""
-    if plates:
-        nearest = min(plates, key=lambda p: abs(p[0] - x))
-        if abs(nearest[0] - x) < 6.0:
-            plate = "@" + nearest[1]
-
-    if re.match(r"^[+-]?\d+(\.\d+)?\s*dB$", t):
-        return t.replace(" ", "") + plate
-    if t.lower() == "bulkhead":
-        return "bulkhead" + plate
-    if t.lower().startswith("hemt"):
-        return "hemt(%s)" % t[4:].strip() + plate
-    if "circulator" in t.lower():
-        return "circ(%s)" % t.replace("Circulator", "").strip() + plate
-    if t.lower() in ("db-25", "db25"):
-        return "db25" + plate
-    if t.lower() == "fischer":
-        return "fischer" + plate
-    if t.lower() in ("term.", "term"):
-        return "term"
-    if t.lower() in ("knl", "k&l"):
-        return "knl" + plate
-    if "eccosorb" in t.lower():
-        return "eccosorb" + plate
-    if t.lower() == "filter" or t.lower() == "filters":
-        return "filter(?)" + plate
-    return "?%r" % t
-
-
-def cluster_rows(shapes, page=0, row_tol=0.32):
-    # group shapes into horizontal rows by y
-    rows = defaultdict(list)
-    keys = []
-    for pi, x, y, w, h, t in sorted(shapes, key=lambda s: (s[2], s[1])):
-        if pi != page or not t:
-            continue
-        if h > 8:
-            continue  # skip plate bars / big boxes
-        placed = False
-        for k in keys:
-            if abs(k - y) < row_tol:
-                rows[k].append((x, t))
-                placed = True
-                break
-        if not placed:
-            keys.append(y)
-            rows[y].append((x, t))
-    result = []
-    for k in sorted(rows):
-        result.append((k, sorted(rows[k])))
-    return result
-
-
-LINE_NAME = re.compile(r"^(In \d+|Out [A-Z]|DC \d+(-\d+)?|Pair \d+)$")
-
-
-def main():
-    if len(sys.argv) < 2:
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or "-h" in argv or "--help" in argv:
         print(__doc__)
-        return 1
-    odg = sys.argv[1]
-    draft = "--draft" in sys.argv
-    shapes = load_shapes(odg)
-    plates = find_plates(shapes)
-
-    if not draft:
-        print("Plates (x_cm, name):")
-        for x, name in plates:
-            print("  %7.2f  %s" % (x, name))
-        print("\nRows (page 1):")
-        for y, items in cluster_rows(shapes):
-            names = [t for _x, t in items]
-            print("  y=%7.2f  %s" % (y, "  |  ".join(names)))
         return 0
 
-    # write a draft common.txt
-    print("# DRAFT common.txt generated by tools/extract_odg.py from %s" % odg)
-    print("# Proofread before use!\n")
-    print("[plates]")
-    for _x, name in plates:
-        print("%s: ?" % name)
-    print()
+    outdir = None
+    if "-o" in argv:
+        i = argv.index("-o")
+        if i + 1 >= len(argv):
+            print("error: -o needs a directory", file=sys.stderr)
+            return 2
+        outdir = argv[i + 1]
+        del argv[i:i + 2]
 
-    chains = {}
-    for y, items in cluster_rows(shapes):
-        name = None
-        toks = []
-        for x, t in items:
-            if LINE_NAME.match(t) and name is None:
-                name = t
-            else:
-                toks.append(guess_token(t, x, plates))
-        if name and toks:
-            chains[name] = toks
-    for name, toks in chains.items():
-        print("# %s: %s" % (name, " -> ".join(toks)))
+    draft = "--draft" in argv
+    if draft:
+        argv.remove("--draft")
+
+    odg = None
+    for a in argv:
+        if not a.startswith("-"):
+            odg = a
+            break
+    if not odg:
+        print(__doc__)
+        return 2
+
+    if not os.path.isfile(odg):
+        print("error: file not found: %s" % odg, file=sys.stderr)
+        return 1
+
+    if not draft and not outdir:
+        # readable report, same idea as the old default
+        sys.stdout.write(describe(odg))
+        print("\n# Write a real common.txt with --draft or -o DIR", file=sys.stderr)
+        return 0
+
+    common, wiring, notes = extract(odg)
+    if outdir:
+        os.makedirs(outdir, exist_ok=True)
+        cpath = os.path.join(outdir, "common.txt")
+        with open(cpath, "w", encoding="utf-8") as f:
+            f.write(common)
+        print("wrote %s" % cpath)
+        if wiring:
+            wpath = os.path.join(outdir, "extracted.txt")
+            with open(wpath, "w", encoding="utf-8") as f:
+                f.write(wiring)
+            print("wrote %s" % wpath)
+    else:
+        sys.stdout.write(common)
+    for n in notes:
+        print("import: %s" % n, file=sys.stderr)
     return 0
 
 

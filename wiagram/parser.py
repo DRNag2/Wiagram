@@ -27,7 +27,8 @@ import re
 
 from .model import (
     AUTO_THROUGH, Chain, Component, Connection, Design, DYNAMIC_PORT_KINDS,
-    FIXED_PORTS, KIND_ALIASES, Line, ParseError, Src, TWO_PORT_KINDS,
+    FIXED_PORTS, KIND_ALIASES, Line, ParseError, ParseErrors, Src,
+    TWO_PORT_KINDS,
 )
 
 SECTION_RE = re.compile(r"^\[\s*(\w+)(?:\s+([^\]]+?))?\s*\]$")
@@ -37,47 +38,85 @@ RANGE_RE = re.compile(r"^(.*?)(\d+|[A-Z])\s*\.\.\s*(?:(.*?))?(\d+|[A-Z])$")
 CALL_RE = re.compile(r"^([\w-]+)\s*(?:\((.*)\))?$")
 
 
-# stuff you can type straight into a chain like "-20dB" or "term(50)"
+# stuff you can type straight into a chain like "-20dB" or "term(50)".
+# Each record is (regex, syntax, example, description, factory); the factory
+# gets (match, token) and returns (kind, label, params).  TOOLBOX.md is
+# generated from this table, so keep syntax/description readable.
 
-def _inline_patterns():
-    def atten(m, tok):
-        return ("attenuator", tok.replace(" ", ""), {})
+class InlinePart:
+    def __init__(self, regex, syntax, example, description, factory):
+        self.regex = re.compile(regex, re.I)
+        self.syntax = syntax
+        self.example = example
+        self.description = description
+        self.factory = factory
 
-    def term(m, tok):
-        return ("term", m.group(1) or "50Ω", {})
+    def match(self, tok):
+        return self.regex.match(tok)
 
-    pats = [
-        (r"^[+-]?\d+(?:\.\d+)?\s*dB$", atten),
-        (r"^term(?:\((.*)\))?$", term),
-        (r"^eccosorb$", lambda m, t: ("filter", "Eccosorb", {})),
-        (r"^(?:knl|k&l)(?:\((.*)\))?$",
-         lambda m, t: ("filter", ("K&L " + m.group(1)).strip() if m.group(1) else "K&L", {})),
-        (r"^(lp|hp|bp)\((.*)\)$",
-         lambda m, t: ("filter", "%s %s" % (m.group(1).upper(), m.group(2)), {})),
-        (r"^filter\((.*)\)$", lambda m, t: ("filter", m.group(1), {})),
-        (r"^hemt(?:\((.*)\))?$",
-         lambda m, t: ("amplifier", ("HEMT " + m.group(1)).strip() if m.group(1) else "HEMT", {})),
-        (r"^amp(?:\((.*)\))?$",
-         lambda m, t: ("amplifier", m.group(1) or "Amp", {})),
-        (r"^bulkhead$", lambda m, t: ("bulkhead", "", {})),
-        (r"^db-?25$", lambda m, t: ("connector", "DB-25", {})),
-        (r"^fischer$", lambda m, t: ("connector", "Fischer", {})),
-        (r"^sma$", lambda m, t: ("connector", "SMA", {})),
-        (r"^cable\((.*)\)$", lambda m, t: ("cable", "", {"type": m.group(1)})),
-        (r"^coupler(?:\((.*)\))?$",
-         lambda m, t: ("coupler", m.group(1) or "", {})),
-        (r"^biastee$|^bias-tee$", lambda m, t: ("biastee", "Bias-T", {})),
-        (r"^circ(?:ulator)?\((.*)\)$",
-         lambda m, t: ("circulator", m.group(1), {})),
-        (r"^iso(?:lator)?(?:\((.*)\))?$",
-         lambda m, t: ("isolator", m.group(1) or "", {})),
-    ]
-    compiled = []
-    for p, fn in pats:
-        compiled.append((re.compile(p, re.I), fn))
-    return compiled
+    def make(self, m, tok):
+        return self.factory(m, tok)
 
-INLINE_PATTERNS = _inline_patterns()
+
+def _opt(prefix, m):
+    # "HEMT A1" / "HEMT" style labels from an optional (...) argument
+    return (prefix + " " + m.group(1)).strip() if m.group(1) else prefix
+
+
+INLINE_PARTS = [
+    InlinePart(r"^[+-]?\d+(?:\.\d+)?\s*dB$", "<n>dB", "-20dB",
+               "attenuator; the number is the label (0dB for a plain through)",
+               lambda m, t: ("attenuator", t.replace(" ", ""), {})),
+    InlinePart(r"^term(?:\((.*)\))?$", "term, term(<label>)", "term(50)",
+               "termination / 50 Ohm load; ends the chain",
+               lambda m, t: ("term", m.group(1) or "50Ω", {})),
+    InlinePart(r"^eccosorb$", "eccosorb", "eccosorb",
+               "Eccosorb infrared filter",
+               lambda m, t: ("filter", "Eccosorb", {})),
+    InlinePart(r"^(?:knl|k&l)(?:\((.*)\))?$", "knl, knl(<model>)", "knl(6L250)",
+               "K&L low-pass filter",
+               lambda m, t: ("filter", _opt("K&L", m), {})),
+    InlinePart(r"^(lp|hp|bp)\((.*)\)$", "lp(<f>), hp(<f>), bp(<f>)", "lp(12GHz)",
+               "low-/high-/band-pass filter with its corner frequency or model",
+               lambda m, t: ("filter", "%s %s" % (m.group(1).upper(), m.group(2)), {})),
+    InlinePart(r"^filter\((.*)\)$", "filter(<label>)", "filter(ZX75-...)",
+               "any other filter; the label is printed under the symbol",
+               lambda m, t: ("filter", m.group(1), {})),
+    InlinePart(r"^hemt(?:\((.*)\))?$", "hemt, hemt(<name>)", "hemt(A1)",
+               "HEMT amplifier (usually in the output line templates)",
+               lambda m, t: ("amplifier", _opt("HEMT", m), {})),
+    InlinePart(r"^amp(?:\((.*)\))?$", "amp, amp(<name>)", "amp(TWPA)",
+               "any other amplifier (TWPA, SPA, JPA ...)",
+               lambda m, t: ("amplifier", m.group(1) or "Amp", {})),
+    InlinePart(r"^bulkhead$", "bulkhead", "bulkhead@4K",
+               "SMA bulkhead feedthrough on a plate",
+               lambda m, t: ("bulkhead", "", {})),
+    InlinePart(r"^db-?25$", "db25", "db25@Top",
+               "DB-25 connector (DC looms)",
+               lambda m, t: ("connector", "DB-25", {})),
+    InlinePart(r"^fischer$", "fischer", "fischer",
+               "Fischer connector",
+               lambda m, t: ("connector", "Fischer", {})),
+    InlinePart(r"^sma$", "sma", "sma",
+               "SMA adapter / connector",
+               lambda m, t: ("connector", "SMA", {})),
+    InlinePart(r"^cable\((.*)\)$", "cable(<type>)", "cable(NbTi)",
+               "a cable between two parts (SS, NbTi, copper, premade, loom ...); "
+               "sets the wire colour",
+               lambda m, t: ("cable", "", {"type": m.group(1)})),
+    InlinePart(r"^coupler(?:\((.*)\))?$", "coupler, coupler(<label>)", "coupler(-20dB)",
+               "directional coupler, passes in->out; use a [device] to wire cpl/iso",
+               lambda m, t: ("coupler", m.group(1) or "", {})),
+    InlinePart(r"^biastee$|^bias-tee$", "biastee", "biastee",
+               "bias tee, passes rf->out; use a [device] to wire the dc port",
+               lambda m, t: ("biastee", "Bias-T", {})),
+    InlinePart(r"^circ(?:ulator)?\((.*)\)$", "circ(<label>)", "circ(C7)",
+               "circulator used in-line, passes 1->2; use a [device] to wire port 3",
+               lambda m, t: ("circulator", m.group(1), {})),
+    InlinePart(r"^iso(?:lator)?(?:\((.*)\))?$", "iso, iso(<label>)", "iso(LNF)",
+               "isolator",
+               lambda m, t: ("isolator", m.group(1) or "", {})),
+]
 
 
 # ---- phase 1: just read the file into a RawFile ----
@@ -100,120 +139,134 @@ def _strip_comment(line):
 
 
 def parse_file(path):
+    # every bad line in the file is collected and raised together
     raw = RawFile(path)
     section = None        # None = still in metadata, else (kind, name, dict, Src)
     pending_chain = None  # for chains that wrap across lines with ->
+    errors = []
 
     with open(path, encoding="utf-8") as f:
         raw_lines = f.readlines()
-
-    def flush_chain():
-        nonlocal pending_chain
-        if pending_chain is not None:
-            raw.chains.append(pending_chain)
-            pending_chain = None
 
     for lineno, orig in enumerate(raw_lines, 1):
         line = _strip_comment(orig).strip()
         if not line:
             continue
         src = Src(raw.name, lineno)
+        try:
+            section, pending_chain = _parse_line(
+                raw, line, lineno, src, section, pending_chain)
+        except ParseError as e:
+            errors.append(e)
 
-        m = SECTION_RE.match(line)
-        if m:
-            flush_chain()
-            kind = m.group(1).lower()
-            name = (m.group(2) or "").strip()
-            if kind in ("device", "cable", "template"):
-                if not name:
-                    raise ParseError("[%s] needs a name, e.g. [%s c24]" % (kind, kind),
-                                     raw.name, lineno)
-                if "." in name or "->" in name or " " in name:
-                    raise ParseError(
-                        "%s name '%s' may not contain spaces, dots or arrows"
-                        % (kind, name), raw.name, lineno)
-                d = {}
-                if kind == "device":
-                    store = raw.devices
-                elif kind == "cable":
-                    store = raw.cables
-                else:
-                    store = raw.templates
-                if name in store:
-                    raise ParseError("duplicate [%s %s]" % (kind, name), raw.name, lineno)
-                store[name] = (d, src)
-                section = (kind, name, d, src)
-            elif kind in ("plates", "lines", "wiring"):
-                section = (kind, "", None, src)
-            else:
-                raise ParseError(
-                    "unknown section [%s]; expected device, cable, template, "
-                    "plates, lines or wiring" % kind, raw.name, lineno)
-            continue
-
-        # still at the top of the file (metadata)
-        if section is None:
-            m = KV_RE.match(line)
-            if not m:
-                raise ParseError("expected 'key: value' metadata or a [section]",
-                                 raw.name, lineno)
-            raw.meta[m.group(1).strip().lower()] = m.group(2).strip()
-            continue
-
-        skind = section[0]
-        if skind in ("device", "cable", "template"):
-            m = KV_RE.match(line)
-            if not m:
-                # maybe continuing a value that ended with ->
-                d = section[2]
-                if d:
-                    lastkey = list(d)[-1]
-                    val, vsrc = d[lastkey]
-                    if val.rstrip().endswith("->"):
-                        d[lastkey] = (val + " " + line, vsrc)
-                        continue
-                raise ParseError("expected 'key: value' inside [%s %s]"
-                                 % (skind, section[1]), raw.name, lineno)
-            key = m.group(1).strip().lower()
-            section[2][key] = (m.group(2).strip(), src)
-        elif skind == "plates":
-            m = KV_RE.match(line)
-            if not m:
-                raise ParseError("expected 'PlateName: temperature'", raw.name, lineno)
-            raw.plates.append((m.group(1).strip(), m.group(2).strip(), src))
-        elif skind == "lines":
-            m = KV_RE.match(line)
-            if not m:
-                raise ParseError(
-                    "expected 'Line name: template' or 'In 1..In 24: template'",
-                    raw.name, lineno)
-            spec = m.group(1).strip()
-            rhs = m.group(2).strip()
-            cm = CALL_RE.match(rhs)
-            if not cm:
-                raise ParseError("bad template reference '%s'" % rhs, raw.name, lineno)
-            params = {}
-            if cm.group(2):
-                for part in cm.group(2).split(","):
-                    if "=" not in part:
-                        raise ParseError(
-                            "template parameters must look like name=value: '%s'"
-                            % part.strip(), raw.name, lineno)
-                    k, v = part.split("=", 1)
-                    params[k.strip()] = v.strip()
-            raw.line_decls.append((spec, cm.group(1), params, src))
-        elif skind == "wiring":
-            # glue onto previous line if they left a trailing ->
-            if pending_chain is not None:
-                text = pending_chain[0] + " " + line
-                pending_chain = (text, pending_chain[1])
-            else:
-                pending_chain = (line, src)
-            if not pending_chain[0].rstrip().endswith("->"):
-                flush_chain()
-
-    flush_chain()
+    if pending_chain is not None:
+        raw.chains.append(pending_chain)
+    if errors:
+        raise ParseErrors(errors)
     return raw
+
+
+def _parse_line(raw, line, lineno, src, section, pending_chain):
+    # one non-blank line; returns the updated (section, pending_chain)
+
+    def flush(pending):
+        if pending is not None:
+            raw.chains.append(pending)
+        return None
+
+    m = SECTION_RE.match(line)
+    if m:
+        pending_chain = flush(pending_chain)
+        kind = m.group(1).lower()
+        name = (m.group(2) or "").strip()
+        if kind in ("device", "cable", "template"):
+            if not name:
+                raise ParseError("[%s] needs a name, e.g. [%s c24]" % (kind, kind),
+                                 raw.name, lineno)
+            if "." in name or "->" in name or " " in name:
+                raise ParseError(
+                    "%s name '%s' may not contain spaces, dots or arrows"
+                    % (kind, name), raw.name, lineno)
+            d = {}
+            if kind == "device":
+                store = raw.devices
+            elif kind == "cable":
+                store = raw.cables
+            else:
+                store = raw.templates
+            if name in store:
+                raise ParseError("duplicate [%s %s]" % (kind, name), raw.name, lineno)
+            store[name] = (d, src)
+            section = (kind, name, d, src)
+        elif kind in ("plates", "lines", "wiring"):
+            section = (kind, "", None, src)
+        else:
+            raise ParseError(
+                "unknown section [%s]; expected device, cable, template, "
+                "plates, lines or wiring" % kind, raw.name, lineno)
+        return section, pending_chain
+
+    # still at the top of the file (metadata)
+    if section is None:
+        m = KV_RE.match(line)
+        if not m:
+            raise ParseError("expected 'key: value' metadata or a [section]",
+                             raw.name, lineno)
+        raw.meta[m.group(1).strip().lower()] = m.group(2).strip()
+        return section, pending_chain
+
+    skind = section[0]
+    if skind in ("device", "cable", "template"):
+        m = KV_RE.match(line)
+        if not m:
+            # maybe continuing a value that ended with ->
+            d = section[2]
+            if d:
+                lastkey = list(d)[-1]
+                val, vsrc = d[lastkey]
+                if val.rstrip().endswith("->"):
+                    d[lastkey] = (val + " " + line, vsrc)
+                    return section, pending_chain
+            raise ParseError("expected 'key: value' inside [%s %s]"
+                             % (skind, section[1]), raw.name, lineno)
+        key = m.group(1).strip().lower()
+        section[2][key] = (m.group(2).strip(), src)
+    elif skind == "plates":
+        m = KV_RE.match(line)
+        if not m:
+            raise ParseError("expected 'PlateName: temperature'", raw.name, lineno)
+        raw.plates.append((m.group(1).strip(), m.group(2).strip(), src))
+    elif skind == "lines":
+        m = KV_RE.match(line)
+        if not m:
+            raise ParseError(
+                "expected 'Line name: template' or 'In 1..In 24: template'",
+                raw.name, lineno)
+        spec = m.group(1).strip()
+        rhs = m.group(2).strip()
+        cm = CALL_RE.match(rhs)
+        if not cm:
+            raise ParseError("bad template reference '%s'" % rhs, raw.name, lineno)
+        params = {}
+        if cm.group(2):
+            for part in cm.group(2).split(","):
+                if "=" not in part:
+                    raise ParseError(
+                        "template parameters must look like name=value: '%s'"
+                        % part.strip(), raw.name, lineno)
+                k, v = part.split("=", 1)
+                params[k.strip()] = v.strip()
+        raw.line_decls.append((spec, cm.group(1), params, src))
+    elif skind == "wiring":
+        # glue onto previous line if they left a trailing ->
+        if pending_chain is not None:
+            text = pending_chain[0] + " " + line
+            pending_chain = (text, pending_chain[1])
+        else:
+            pending_chain = (line, src)
+        if not pending_chain[0].rstrip().endswith("->"):
+            pending_chain = flush(pending_chain)
+    return section, pending_chain
 
 
 # ---- phase 2: turn RawFiles into a Design ----
@@ -367,10 +420,10 @@ class Builder:
                 src.file, src.line)
 
         # try the inline patterns (-20dB, hemt, etc)
-        for pat, fn in INLINE_PATTERNS:
-            m = pat.match(tok)
+        for part in INLINE_PARTS:
+            m = part.match(tok)
             if m:
-                kind, label, params = fn(m, tok)
+                kind, label, params = part.make(m, tok)
                 self.anon_counter += 1
                 comp = Component(
                     id="%s:~%d" % (ctx["owner"], self.anon_counter),
@@ -484,8 +537,6 @@ class Builder:
                         "line '%s' can only start or end a chain" % ln.name,
                         src.file, src.line)
                 ref = (end_comp.id, "a")
-                self.design.use_port(prev_out, src)
-                self.design.use_port(ref, src)
                 self.connect(prev_out, ref, pending_cable, ctx["owner"], src)
                 chain.comps.append(end_comp.id)
                 pending_cable = None
@@ -514,8 +565,6 @@ class Builder:
                 continue
 
             entry = self.entry_port(comp, explicit, src)
-            self.design.use_port(prev_out, src)
-            self.design.use_port((comp.id, entry), src)
             self.connect(prev_out, (comp.id, entry), pending_cable, ctx["owner"], src)
             pending_cable = None
             chain.comps.append(comp.id)
@@ -534,10 +583,11 @@ class Builder:
         return chain, prev_out, pending_cable
 
     def connect(self, a, b, cable, owner, src):
+        # add_connection raises if either port is already taken
         cid = None
         if cable:
             cid = cable.id
-        self.design.connections.append(Connection(
+        self.design.add_connection(Connection(
             a=a, b=b, cable_id=cid, owner=owner, src=src))
 
     def instantiate_line(self, name, tmpl_name, params, templates, ctx_common, src):
@@ -578,8 +628,6 @@ class Builder:
         chain, open_out, trail_cable = self.walk_chain(
             chain_text, ctx, tsrc, line_name=name)
         if open_out is not None:
-            self.design.use_port(open_out, tsrc)
-            self.design.use_port((end.id, "b"), tsrc)
             self.connect(open_out, (end.id, "b"), trail_cable, "", tsrc)
             chain.comps.append(end.id)
         if _get(tdict, "direction").lower() == "out":
@@ -621,18 +669,28 @@ def build(rawfiles):
             if k not in design.meta:
                 design.meta[k] = v
 
+    # from here on, errors in one declaration or chain are collected and the
+    # rest is still checked, so a file with several mistakes reports them all
+    errors = []
+
     # devices & cables (names are per-file)
     contexts = {}
     for rf in rawfiles:
         devices = {}
         for name, (d, src) in rf.devices.items():
-            devices[name] = b.make_device(rf, rf.owner, name, d, src).id
+            try:
+                devices[name] = b.make_device(rf, rf.owner, name, d, src).id
+            except ParseError as e:
+                errors.append(e)
         for name, (d, src) in rf.cables.items():
             if name in devices:
-                raise ParseError("'%s' is both a device and a cable" % name,
-                                 src.file, src.line)
+                errors.append(ParseError("'%s' is both a device and a cable" % name,
+                                         src.file, src.line))
+                continue
             devices[name] = b.make_cable(rf, rf.owner, name, d, src).id
         contexts[rf.name] = {"owner": rf.owner, "devices": devices}
+    if errors:
+        raise ParseErrors(errors)
 
     # templates are global
     templates = {}
@@ -654,7 +712,12 @@ def build(rawfiles):
     for rf in rawfiles:
         ctx = contexts[rf.name]
         for text, src in rf.chains:
-            b.walk_chain(text, ctx, src)
+            try:
+                b.walk_chain(text, ctx, src)
+            except ParseError as e:
+                errors.append(e)
+    if errors:
+        raise ParseErrors(errors)
 
     design.validate()
     return design
@@ -677,7 +740,15 @@ def load(paths, common_name="common.txt"):
     # put common.txt first so plates/templates exist before other files
     files.sort(key=lambda f: (os.path.basename(f) != common_name,
                               os.path.basename(f)))
+    # phase 1 is per-file, so read every file and report all the syntax
+    # errors together instead of stopping at the first one
     rawfiles = []
+    errors = []
     for f in files:
-        rawfiles.append(parse_file(f))
+        try:
+            rawfiles.append(parse_file(f))
+        except ParseError as e:
+            errors.append(e)
+    if errors:
+        raise ParseErrors(errors)
     return build(rawfiles)
