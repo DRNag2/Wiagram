@@ -1327,15 +1327,11 @@ class Net:
             xs = [c["x1"] for c in members] + [c["x2"] for c in members]
             if max(xs) < x0:
                 continue  # entirely in the template half of the drawing
-            cable = ""
-            for st in strokes:
-                if st in STROKE_CABLE:
-                    cable = STROKE_CABLE[st]
-                    break
             # green is the DC colour, but Oxford also uses it for RF cabling
             # inside sample cans: only treat it as DC if it reaches a DC part
             is_dc_wire = False
             terminals = []   # (Part, x, y)
+            stroke_at = {}   # id(terminal) -> stroke colour of the segment on it
             loose = []
             for c in members:
                 for ref, x, y in ((c["start"], c["x1"], c["y1"]), (c["end"], c["x2"], c["y2"])):
@@ -1351,7 +1347,9 @@ class Net:
                         else:
                             loose.append((x, y))
                             continue
-                    terminals.append((p, x, y))
+                    t = (p, x, y)
+                    terminals.append(t)
+                    stroke_at[id(t)] = c["stroke"]
             # drop duplicate terminals (same part twice from a shared end)
             # (a wire touching both the body and a port stub of the same
             # experiment is one connection)
@@ -1361,6 +1359,21 @@ class Net:
                     continue
                 uniq.append(t)
             terminals = uniq
+
+            # cable material: a net can mix colours (Oxford: NbTi from the
+            # HEMT to the plate clamp, copper from the clamp to the stack),
+            # so take the colour of the segment that lands on the part, not
+            # an arbitrary member of the set
+            def cable_for(a, b):
+                for t in (a, b):
+                    if t[0].kind not in ("line", "anchor"):
+                        st = stroke_at.get(id(t))
+                        if st in STROKE_CABLE:
+                            return STROKE_CABLE[st]
+                for st in sorted(strokes, key=lambda s: s or ""):
+                    if st in STROKE_CABLE:
+                        return STROKE_CABLE[st]
+                return ""
 
             in_scope = any(t[0].kind not in ("line", "anchor") for t in terminals)
             if not in_scope:
@@ -1380,7 +1393,7 @@ class Net:
                 self.note("wire joins %d parts (%s); connected in sequence"
                           % (len(terminals), names))
             for a, b in zip(terminals, terminals[1:]):
-                self.add_edge(a, b, cable, "wire")
+                self.add_edge(a, b, cable_for(a, b), "wire")
 
     def _note_dc(self, terminals):
         rf = [t for t in terminals if t[0].kind != "dc"]

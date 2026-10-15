@@ -2,7 +2,9 @@
 
 from xml.sax.saxutils import escape
 
+import cairocffi
 import cairosvg
+import cairosvg.surface
 
 from . import symbols
 from .layout import LayoutData, layout
@@ -191,9 +193,20 @@ def render_svg(design: Design, ld: LayoutData = None) -> str:
     return head + "".join(body) + "</svg>\n"
 
 
+class _StablePDFSurface(cairosvg.surface.PDFSurface):
+    # cairo stamps the current time into the PDF, which would make every CI
+    # run commit a "changed" wiring.pdf; pin it so identical text gives
+    # identical bytes
+    def _create_surface(self, width, height):
+        surface, w, h = super()._create_surface(width, height)
+        surface.set_metadata(cairocffi.PDF_METADATA_CREATE_DATE, "2000-01-01T00:00:00Z")
+        surface.set_metadata(cairocffi.PDF_METADATA_CREATOR, "wiagram")
+        return surface, w, h
+
+
 def render_pdf(svg_text):
     # PDF bytes for an SVG string
-    return cairosvg.svg2pdf(bytestring=svg_text.encode("utf-8"))
+    return _StablePDFSurface.convert(bytestring=svg_text.encode("utf-8"))
 
 
 def render_png(svg_text):

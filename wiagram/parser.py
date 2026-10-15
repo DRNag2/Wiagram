@@ -414,12 +414,9 @@ class Builder:
             if port:
                 self.check_port(comp, port, src)
             return ("comp", comp, port)
-        if "." in tok:
-            raise ParseError(
-                "unknown device '%s' (declare it with [device %s])" % (name, name),
-                src.file, src.line)
-
-        # try the inline patterns (-20dB, hemt, etc)
+        # try the inline patterns (-20dB, hemt, etc).  Done before the
+        # "unknown device" check so labels with a dot, e.g. lp(12.5GHz),
+        # are not mistaken for name.port
         for part in INLINE_PARTS:
             m = part.match(tok)
             if m:
@@ -435,6 +432,11 @@ class Builder:
                 if kind == "cable":
                     return ("cable", comp, None)
                 return ("comp", comp, None)
+
+        if "." in tok:
+            raise ParseError(
+                "unknown device '%s' (declare it with [device %s])" % (name, name),
+                src.file, src.line)
 
         known = sorted(ctx["devices"])
         if known:
@@ -677,20 +679,20 @@ def build(rawfiles):
     contexts = {}
     for rf in rawfiles:
         devices = {}
-        for name, (d, src) in rf.devices.items():
+        broken = set()   # declarations that failed: chains using them are
+        for name, (d, src) in rf.devices.items():   # not reported again
             try:
                 devices[name] = b.make_device(rf, rf.owner, name, d, src).id
             except ParseError as e:
                 errors.append(e)
+                broken.add(name)
         for name, (d, src) in rf.cables.items():
             if name in devices:
                 errors.append(ParseError("'%s' is both a device and a cable" % name,
                                          src.file, src.line))
                 continue
             devices[name] = b.make_cable(rf, rf.owner, name, d, src).id
-        contexts[rf.name] = {"owner": rf.owner, "devices": devices}
-    if errors:
-        raise ParseErrors(errors)
+        contexts[rf.name] = {"owner": rf.owner, "devices": devices, "broken": broken}
 
     # templates are global
     templates = {}
@@ -715,7 +717,9 @@ def build(rawfiles):
             try:
                 b.walk_chain(text, ctx, src)
             except ParseError as e:
-                errors.append(e)
+                names = {t.strip().split("@")[0].split(".")[0] for t in text.split("->")}
+                if not (names & ctx["broken"]):
+                    errors.append(e)
     if errors:
         raise ParseErrors(errors)
 
