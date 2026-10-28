@@ -98,7 +98,7 @@ Use it between two parts: `cavity.ro_out -> nb1 -> c24.1`.
 
 ## Metadata
 
-At the top of any file: `owner: Theo` names the band your wiring is drawn
+At the top of any file: `owner: Bob` names the band your wiring is drawn
 in.  `common.txt` also has `fridge: <title>`.
 
 ## `common.txt` sections

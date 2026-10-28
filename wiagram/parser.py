@@ -3,7 +3,7 @@
 # each person has their own file + there's a shared common.txt
 #
 # example:
-#   owner: Theo
+#   owner: Bob
 #
 #   [device kerrcat]
 #   type: experiment

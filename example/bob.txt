@@ -1,4 +1,4 @@
-owner: Theo
+owner: Bob
 
 [device cavity]
 type: experiment

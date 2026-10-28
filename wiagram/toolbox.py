@@ -149,7 +149,7 @@ def toolbox_markdown():
     w("")
     w("## Metadata")
     w("")
-    w("At the top of any file: `owner: Theo` names the band your wiring is drawn")
+    w("At the top of any file: `owner: Bob` names the band your wiring is drawn")
     w("in.  `common.txt` also has `fridge: <title>`.")
     w("")
     w("## `common.txt` sections")

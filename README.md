@@ -2,7 +2,7 @@
 
 Turn plain-text fridge wiring files into a PDF and PNG diagram.
 
-Each person keeps their own file (`theo.txt`, `haley.txt`, …) next to a shared
+Each person keeps their own file (`bob.txt`, `alice.txt`, …) next to a shared
 `common.txt`. Wiagram merges them and draws the whole fridge. Wiring changes
 live in git like code, and every push rebuilds the diagrams.
 
@@ -41,8 +41,8 @@ A fridge folder always holds the same set of files; versions live in git:
 ```
 fridge/
   common.txt    # plates, line templates, line list (shared)
-  theo.txt      # Theo's devices + wiring
-  haley.txt     # Haley's devices + wiring
+  bob.txt       # Bob's devices + wiring
+  alice.txt     # Alice's devices + wiring
   wiring.pdf    # generated
   wiring.png    # generated
   errors.log    # generated: empty when the build succeeded
@@ -86,10 +86,10 @@ Minimal shape:
 2. `[device …]` / `[cable …]` declarations
 3. A `[wiring]` section of arrow chains
 
-Example (`theo.txt`-style):
+Example (`bob.txt`-style):
 
 ```
-owner: Theo
+owner: Bob
 
 [device cavity]
 type: experiment
@@ -221,7 +221,7 @@ filters, couplers, experiments and their wiring, with cable materials taken
 from the wire colours), then builds the folder. Anything in the drawing that
 could not be resolved is printed to stderr as `import: ...` lines, for
 example a wire that ends in empty space or a box with no wires. Proofread
-those, then split `extracted.txt` into owner files like `theo.txt` if you
+those, then split `extracted.txt` into owner files like `bob.txt` if you
 want. `tools/extract_odg.py` is the same converter as a standalone script
 (`--draft` prints `common.txt` to stdout).
 
