@@ -1,23 +1,20 @@
-owner: Bob
+owner: Charlie
 
-[device cavity]
+[device readout]
 type: experiment
-label: Transmon + Cavity
-serial: TS20231027-1
+label: Readout
 plate: MXC
-ports: ro_in:W, qubit:W, ro_out:E
+ports: in:W, out:E
 
-[device c24]
+[device c7]
 type: circulator
-label: C24
+label: C7
 
-[cable nb1]
+[cable nb2]
 type: NbTi
-serial: ZS20211123-3
 
 [wiring]
-In 1 -> -10dB@MXC -> knl -> cavity.ro_in
-In 2 -> -3dB@MXC -> knl -> cavity.qubit
-cavity.ro_out -> nb1 -> c24.1
-c24.2 -> Out B
-c24.3 -> term
+In 3 -> -10dB@MXC -> knl -> readout.in
+readout.out -> nb2 -> c7.1
+c7.2 -> Out D
+c7.3 -> term
