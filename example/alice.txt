@@ -4,7 +4,7 @@ owner: Alice
 type: experiment
 label: Kerr-Cat
 serial: YC20231120-01
-plate: MXC_error_text
+plate: MXC
 ports: in:W, out:E
 
 [device c6]
