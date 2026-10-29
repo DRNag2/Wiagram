@@ -1,0 +1,2 @@
+extracted.txt:199: line 'In 3' is already connected (first used at alice.txt:17)
+extracted.txt:225: line 'Out D' is already connected (first used at alice.txt:19)
